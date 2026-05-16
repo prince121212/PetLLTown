@@ -27,7 +27,6 @@ interface PageData {
   homeStageStyle: string
   petVideoUrl: string
   listenOrbVideoUrl: string
-  petCanvasReady: boolean
   currentFrame: string
   listenFrame: string
   settingsThumb: string
@@ -129,21 +128,8 @@ interface PetCanvasNode {
   createImage(): PetCanvasImage
 }
 
-let frameTimer = 0
-let frameIndex = 1
-let petCanvas: PetCanvasNode | null = null
-let petCanvasContext: PetCanvasContext | null = null
-let petCanvasWidth = 0
-let petCanvasHeight = 0
-let petCanvasDpr = 1
-let petFrameCache: Record<string, PetCanvasImage> = {}
-let petFrameFileCache: Record<string, string> = {}
-let petFrameLoading: Record<string, boolean> = {}
-let petFrameFailed: Record<string, boolean> = {}
-let petLastRequestedFrameUrl = ''
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
 let activeManifest: PetManifest = FALLBACK_PET_MANIFEST
-let activeActionId = FALLBACK_PET_MANIFEST.defaultState
 let activeManifestSource: 'fallback' | 'remote' = 'fallback'
 let recorder: WechatMiniprogram.RecorderManager | null = null
 let recorderReady = false
@@ -165,30 +151,10 @@ const RECORD_FORMAT: 'mp3' = 'mp3'
 const RECORDER_STOP_FALLBACK_MS = 1800
 const REALTIME_FRAME_SIZE_KB = 4
 
-function frameMs(): number {
-  return 1000 / findManifestAction(activeManifest, activeActionId).fps
-}
-
-function frameUrl(index: number): string {
-  return manifestFrameUrl(index)
-}
-
-function manifestFrameUrl(index: number, actionId = activeActionId): string {
-  const action = findManifestAction(activeManifest, actionId)
-  const range = action.endIndex - action.startIndex + 1
-  const normalized = ((index - action.startIndex) % range + range) % range + action.startIndex
-  const fileName = action.framePattern.replace(/\{index:0+}/, (token) => {
-    const digits = token.length - '{index:'.length - '}'.length
-    return String(normalized).padStart(digits, '0')
-  })
-
-  return `${activeManifest.assets.baseUrl}${fileName}`
-}
-
 function buildPickerPets(pets: PetOption[]): Array<PetOption & { frame: string }> {
-  return pets.map((pet, index) => ({
+  return pets.map((pet) => ({
     ...pet,
-    frame: frameUrl(frameIndex + pet.frameOffset + index),
+    frame: pet.thumbUrl || '',
   }))
 }
 
@@ -203,9 +169,9 @@ function buildPageData(config = bootstrapConfig): Partial<PageData> {
     homeHint: config.homeHint,
     petVideoUrl: config.homeMedia.petVideoUrl,
     listenOrbVideoUrl: config.homeMedia.listenOrbVideoUrl,
-    currentFrame: frameUrl(frameIndex),
-    listenFrame: frameUrl(config.frameSequence.listenFrameIndex),
-    settingsThumb: frameUrl(config.frameSequence.settingsThumbFrame),
+    currentFrame: (activePet && activePet.thumbUrl) || '',
+    listenFrame: (activePet && activePet.listenFrameUrl) || '',
+    settingsThumb: (activePet && activePet.thumbUrl) || '',
     pets,
     pickerPets: buildPickerPets(pets),
     settings: config.settings.items,
@@ -270,10 +236,9 @@ Component({
     homeStageStyle: '',
     petVideoUrl: FALLBACK_BOOTSTRAP_CONFIG.homeMedia.petVideoUrl,
     listenOrbVideoUrl: FALLBACK_BOOTSTRAP_CONFIG.homeMedia.listenOrbVideoUrl,
-    petCanvasReady: false,
-    currentFrame: frameUrl(1),
-    listenFrame: frameUrl(FALLBACK_BOOTSTRAP_CONFIG.frameSequence.listenFrameIndex),
-    settingsThumb: frameUrl(FALLBACK_BOOTSTRAP_CONFIG.frameSequence.settingsThumbFrame),
+    currentFrame: '',
+    listenFrame: '',
+    settingsThumb: '',
     pets: FALLBACK_BOOTSTRAP_CONFIG.pets,
     pickerPets: buildPickerPets(FALLBACK_BOOTSTRAP_CONFIG.pets),
     settings: FALLBACK_BOOTSTRAP_CONFIG.settings.items,
@@ -291,20 +256,18 @@ Component({
       this.initRecorder()
       this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
       this.fetchBootstrapConfig()
-      this.initPetCanvas()
     },
     detached() {
-      this.stopFrameLoop()
-      this.releasePetCanvas()
+      // 清理资源
     },
   },
 
   pageLifetimes: {
     show() {
-      this.startFrameLoop()
+      // 页面显示时的逻辑
     },
     hide() {
-      this.stopFrameLoop()
+      // 页面隐藏时的逻辑
     },
   },
 
@@ -383,54 +346,6 @@ Component({
       recorderReady = true
     },
 
-    initPetCanvas() {
-      wx.nextTick(() => {
-        const query = wx.createSelectorQuery().in(this)
-
-        query
-          .select('#petCanvas')
-          .fields({ node: true, size: true })
-          .exec((result) => {
-            const target = result && result[0]
-            const canvas = target && target.node as PetCanvasNode | undefined
-
-            if (!canvas || !target.width || !target.height) {
-              console.warn('[index] pet canvas unavailable')
-              this.startFrameLoop()
-              return
-            }
-
-            const systemInfo = wx.getSystemInfoSync()
-            const context = canvas.getContext('2d')
-
-            petCanvas = canvas
-            petCanvasContext = context
-            petCanvasWidth = target.width
-            petCanvasHeight = target.height
-            petCanvasDpr = systemInfo.pixelRatio || 1
-            canvas.width = Math.floor(petCanvasWidth * petCanvasDpr)
-            canvas.height = Math.floor(petCanvasHeight * petCanvasDpr)
-            context.scale(petCanvasDpr, petCanvasDpr)
-
-            petLastRequestedFrameUrl = frameUrl(frameIndex)
-            this.drawPetFrame(petLastRequestedFrameUrl)
-            this.startFrameLoop()
-          })
-      })
-    },
-
-    releasePetCanvas() {
-      petCanvas = null
-      petCanvasContext = null
-      petCanvasWidth = 0
-      petCanvasHeight = 0
-      petFrameCache = {}
-      petFrameFileCache = {}
-      petFrameLoading = {}
-      petFrameFailed = {}
-      petLastRequestedFrameUrl = ''
-    },
-
     applyBootstrapConfig(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
       bootstrapConfig = config
       this.setData(buildPageData(config))
@@ -461,26 +376,16 @@ Component({
 
     applyPetManifest(manifest: PetManifest, source: 'fallback' | 'remote' = 'remote') {
       activeManifest = manifest
-      activeActionId = manifest.defaultState
       activeManifestSource = source
-      frameIndex = findManifestAction(manifest, activeActionId).startIndex
-      petFrameCache = {}
-      petFrameFileCache = {}
-      petFrameLoading = {}
-      petFrameFailed = {}
-      petLastRequestedFrameUrl = ''
+
+      const activePet = bootstrapConfig.pets.find((pet) => pet.id === manifest.petId)
 
       this.setData({
-        currentFrame: frameUrl(frameIndex),
-        listenFrame: manifestFrameUrl(frameIndex, 'listen'),
-        settingsThumb: manifestFrameUrl(frameIndex, 'idle'),
-        petCanvasReady: false,
+        petVideoUrl: (activePet && activePet.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl,
+        currentFrame: (activePet && activePet.thumbUrl) || '',
+        listenFrame: (activePet && activePet.listenFrameUrl) || '',
+        settingsThumb: (activePet && activePet.thumbUrl) || '',
       })
-
-      this.stopFrameLoop()
-      petLastRequestedFrameUrl = frameUrl(frameIndex)
-      this.drawPetFrame(petLastRequestedFrameUrl)
-      this.startFrameLoop()
     },
 
     async fetchPetManifest(petId: string) {
@@ -509,112 +414,6 @@ Component({
         console.warn('[index] pet manifest fallback:', error)
         this.applyPetManifest(FALLBACK_PET_MANIFEST, 'fallback')
       }
-    },
-
-    drawPetFrame(url: string) {
-      const context = petCanvasContext
-
-      if (!petCanvas || !context || !petCanvasWidth || !petCanvasHeight) {
-        this.setData({ currentFrame: url })
-        return
-      }
-
-      const cached = petFrameCache[url]
-
-      if (cached) {
-        const imageWidth = Number(cached.width) || petCanvasWidth
-        const imageHeight = Number(cached.height) || petCanvasHeight
-        const scale = Math.min(petCanvasWidth / imageWidth, petCanvasHeight / imageHeight)
-        const drawWidth = imageWidth * scale
-        const drawHeight = imageHeight * scale
-        const x = (petCanvasWidth - drawWidth) / 2
-        const y = (petCanvasHeight - drawHeight) / 2
-
-        context.clearRect(0, 0, petCanvasWidth, petCanvasHeight)
-        context.drawImage(cached, x, y, drawWidth, drawHeight)
-        if (!this.data.petCanvasReady) {
-          this.setData({ petCanvasReady: true })
-        }
-        return
-      }
-
-      this.preloadPetFrame(url)
-    },
-
-    preloadPetFrame(url: string) {
-      if (!petCanvas || petFrameCache[url] || petFrameLoading[url] || petFrameFailed[url]) return
-
-      petFrameLoading[url] = true
-
-      this.resolvePetFrameSource(url)
-        .then((source) => {
-          if (!petCanvas) return
-
-          const image = petCanvas.createImage()
-
-          image.onload = () => {
-            petFrameCache[url] = image
-            petFrameLoading[url] = false
-
-            if (!this.data.petCanvasReady || petLastRequestedFrameUrl === url) {
-              this.drawPetFrame(url)
-            }
-          }
-          image.onerror = (error) => {
-            petFrameLoading[url] = false
-            petFrameFailed[url] = true
-            console.warn('[index] pet frame image decode failed:', url, error)
-          }
-          image.src = source
-        })
-        .catch((error) => {
-          petFrameLoading[url] = false
-          petFrameFailed[url] = true
-          console.warn('[index] pet frame source resolve failed:', url, error)
-        })
-    },
-
-    async resolvePetFrameSource(url: string): Promise<string> {
-      if (!url.startsWith('cloud://')) return url
-
-      const cached = petFrameFileCache[url]
-
-      if (cached) return cached
-
-      if (!wx.cloud) {
-        throw new Error('wx.cloud is not ready')
-      }
-
-      const result = await wx.cloud.downloadFile({
-        fileID: url,
-      })
-
-      if (!result.tempFilePath) {
-        throw new Error('empty tempFilePath')
-      }
-
-      petFrameFileCache[url] = result.tempFilePath
-      return result.tempFilePath
-    },
-
-    startFrameLoop() {
-      if (frameTimer) return
-
-      frameTimer = Number(
-        setInterval(() => {
-          const action = findManifestAction(activeManifest, activeActionId)
-
-          frameIndex = frameIndex >= action.endIndex ? action.startIndex : frameIndex + 1
-          petLastRequestedFrameUrl = frameUrl(frameIndex)
-          this.drawPetFrame(petLastRequestedFrameUrl)
-        }, frameMs()),
-      )
-    },
-
-    stopFrameLoop() {
-      if (!frameTimer) return
-      clearInterval(frameTimer)
-      frameTimer = 0
     },
 
     async resolveHomeMedia(media: HomeMediaConfig) {
@@ -675,7 +474,8 @@ Component({
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       this.setData({
         petName: selected.name,
-        settingsThumb: frameUrl(frameIndex + selected.frameOffset),
+        petVideoUrl: (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl,
+        settingsThumb: (selected && selected.thumbUrl) || '',
         pageName: 'home',
       })
       this.fetchPetManifest(selected.id)

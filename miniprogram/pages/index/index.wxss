@@ -111,19 +111,30 @@ button::after {
 
 .home-page {
   background: #000;
+  position: relative;
+}
+
+.home-wallpaper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
 }
 
 .home-page .safe {
   position: relative;
   display: block;
   padding: 0;
+  z-index: 1;
 }
 
 .home-page .top {
   position: absolute;
   left: 42rpx;
   width: 230rpx;
-  z-index: 6;
+  z-index: 16;
   min-height: 78rpx;
 }
 
@@ -132,7 +143,7 @@ button::after {
   top: -2rpx;
   left: 50%;
   right: auto;
-  z-index: 7;
+  z-index: 17;
   width: 324rpx;
   height: 52rpx;
   transform: translateX(-50%);
@@ -149,7 +160,7 @@ button::after {
   right: 0;
   top: calc(var(--safe-top, 92rpx) + 86rpx);
   bottom: calc(238rpx + env(safe-area-inset-bottom));
-  z-index: 1;
+  z-index: 11;
   display: grid;
   place-items: end center;
   min-height: 0;
@@ -157,7 +168,8 @@ button::after {
 }
 
 .home-page .pet-canvas,
-.home-page .pet-frame {
+.home-page .pet-frame,
+.home-page alpha-video {
   width: 630rpx;
   height: 880rpx;
   max-width: none;
@@ -173,7 +185,7 @@ button::after {
   left: 0;
   right: 0;
   bottom: calc(28rpx + env(safe-area-inset-bottom));
-  z-index: 5;
+  z-index: 15;
   display: grid;
   place-items: center;
   gap: 16rpx;

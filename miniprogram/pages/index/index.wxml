@@ -1,5 +1,6 @@
 <view class="app">
   <view wx:if="{{pageName === 'home'}}" class="page home-page">
+    <image class="home-wallpaper" src="./wallpaper.jpg" mode="aspectFill" />
     <view class="safe" style="{{pageShellStyle}}">
       <view class="top" style="{{homeTopStyle}}">
         <view class="pet-title">
@@ -10,8 +11,15 @@
       <button class="tiny-btn settings-entry" style="{{homeTopStyle}}" aria-label="打开设置" bindtap="openSettings">⚙</button>
 
       <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
-        <canvas id="petCanvas" type="2d" class="pet-canvas"></canvas>
-        <image wx:if="{{!petCanvasReady}}" class="pet-frame" src="{{currentFrame}}" mode="aspectFit" show-menu-by-longpress="{{false}}" />
+        <alpha-video
+          wx:if="{{petVideoUrl}}"
+          src="{{petVideoUrl}}"
+          autoplay="{{true}}"
+          loop="{{true}}"
+          width="630"
+          height="880"
+        ></alpha-video>
+        <image wx:else class="pet-frame" src="{{currentFrame}}" mode="aspectFit" show-menu-by-longpress="{{false}}" />
       </view>
 
       <view class="listen-area" aria-label="语音监听状态">

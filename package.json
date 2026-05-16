@@ -7,6 +7,7 @@
     "sync:bootstrap": "node scripts/sync-bootstrap-config.js",
     "sync:manifests": "node scripts/sync-pet-manifests.js",
     "upload:frames": "node scripts/upload-pet-frames.js",
+    "upload:alpha-video": "node scripts/upload-alpha-video.js",
     "seed:cloudbase": "node scripts/seed-cloudbase-data.js",
     "check:cloudbase": "node scripts/check-cloudbase.js",
     "set:voice-env": "node scripts/set-voice-env.js",

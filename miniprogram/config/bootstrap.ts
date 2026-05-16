@@ -6,6 +6,9 @@ export interface PetOption {
   subtitle: string
   frameOffset: number
   manifestKey?: string
+  videoUrl?: string
+  thumbUrl?: string
+  listenFrameUrl?: string
   enabled?: boolean
 }
 
@@ -71,7 +74,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
   defaultPetName: '小团子',
   homeHint: '它在听你说话',
   homeMedia: {
-    petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle.webm',
+    petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
     listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
   },
   frameSequence: {
@@ -125,10 +128,50 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
     },
   },
   pets: [
-    { id: 'xiaotuanzi', name: '小团子', subtitle: '安静黏人', frameOffset: 1, manifestKey: 'xiaotuanzi/manifest.json', enabled: true },
-    { id: 'buding', name: '布丁', subtitle: '活泼好奇', frameOffset: 25, manifestKey: 'buding/manifest.json', enabled: true },
-    { id: 'naigai', name: '奶盖', subtitle: '爱撒娇', frameOffset: 50, manifestKey: 'naigai/manifest.json', enabled: true },
-    { id: 'doudou', name: '豆豆', subtitle: '喜欢陪你发呆', frameOffset: 75, manifestKey: 'doudou/manifest.json', enabled: true },
+    {
+      id: 'xiaotuanzi',
+      name: '小团子',
+      subtitle: '安静黏人',
+      frameOffset: 1,
+      manifestKey: 'xiaotuanzi/manifest.json',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0030.png',
+      enabled: true
+    },
+    {
+      id: 'buding',
+      name: '布丁',
+      subtitle: '活泼好奇',
+      frameOffset: 25,
+      manifestKey: 'buding/manifest.json',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/buding/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/buding/actions/idle/frames/frame_0030.png',
+      enabled: true
+    },
+    {
+      id: 'naigai',
+      name: '奶盖',
+      subtitle: '爱撒娇',
+      frameOffset: 50,
+      manifestKey: 'naigai/manifest.json',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/naigai/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/naigai/actions/idle/frames/frame_0030.png',
+      enabled: true
+    },
+    {
+      id: 'doudou',
+      name: '豆豆',
+      subtitle: '喜欢陪你发呆',
+      frameOffset: 75,
+      manifestKey: 'doudou/manifest.json',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/doudou/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/doudou/actions/idle/frames/frame_0030.png',
+      enabled: true
+    },
   ],
 }
 
