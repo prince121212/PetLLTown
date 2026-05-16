@@ -23,10 +23,6 @@ function mergeBootstrapConfig(base, override) {
       ...base.assets,
       ...(override.assets || {}),
     },
-    frameSequence: {
-      ...base.frameSequence,
-      ...(override.frameSequence || {}),
-    },
     home: {
       ...base.home,
       ...(override.home || {}),

@@ -28,17 +28,6 @@ export interface MiniAdConfig {
   copy: string
 }
 
-export interface FrameSequenceConfig {
-  frameTotal: number
-  fps: number
-  frameBase: string
-  filePrefix: string
-  digits: number
-  extension: string
-  listenFrameIndex: number
-  settingsThumbFrame: number
-}
-
 export interface HomeMediaConfig {
   petVideoUrl: string
   listenOrbVideoUrl: string
@@ -52,7 +41,6 @@ export interface BootstrapConfig {
   defaultPetName: string
   homeHint: string
   homeMedia: HomeMediaConfig
-  frameSequence: FrameSequenceConfig
   settings: {
     items: SettingItem[]
     miniAd: MiniAdConfig
@@ -74,18 +62,8 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
   defaultPetName: '小团子',
   homeHint: '它在听你说话',
   homeMedia: {
-    petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+    petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
     listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
-  },
-  frameSequence: {
-    frameTotal: 150,
-    fps: 15,
-    frameBase: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/',
-    filePrefix: 'frame_',
-    digits: 4,
-    extension: 'png',
-    listenFrameIndex: 30,
-    settingsThumbFrame: 90,
   },
   settings: {
     items: [
@@ -134,7 +112,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '安静黏人',
       frameOffset: 1,
       manifestKey: 'xiaotuanzi/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
       thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0090.png',
       listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0030.png',
       enabled: true
@@ -145,7 +123,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '活泼好奇',
       frameOffset: 25,
       manifestKey: 'buding/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
       thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/buding/actions/idle/frames/frame_0090.png',
       listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/buding/actions/idle/frames/frame_0030.png',
       enabled: true
@@ -156,7 +134,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '爱撒娇',
       frameOffset: 50,
       manifestKey: 'naigai/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
       thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/naigai/actions/idle/frames/frame_0090.png',
       listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/naigai/actions/idle/frames/frame_0030.png',
       enabled: true
@@ -167,7 +145,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '喜欢陪你发呆',
       frameOffset: 75,
       manifestKey: 'doudou/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/HEVC（Alpha）版本.mp4',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
       thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/doudou/actions/idle/frames/frame_0090.png',
       listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/doudou/actions/idle/frames/frame_0030.png',
       enabled: true
@@ -202,23 +180,6 @@ function isSettingItem(value: unknown): value is SettingItem {
     typeof value.subtitle === 'string' &&
     (kind === 'link' || kind === 'switch')
   )
-}
-
-function mergeFrameSequence(value: unknown): FrameSequenceConfig {
-  if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.frameSequence
-
-  const fallback = FALLBACK_BOOTSTRAP_CONFIG.frameSequence
-
-  return {
-    frameTotal: typeof value.frameTotal === 'number' ? value.frameTotal : fallback.frameTotal,
-    fps: typeof value.fps === 'number' ? value.fps : fallback.fps,
-    frameBase: typeof value.frameBase === 'string' ? value.frameBase : fallback.frameBase,
-    filePrefix: typeof value.filePrefix === 'string' ? value.filePrefix : fallback.filePrefix,
-    digits: typeof value.digits === 'number' ? value.digits : fallback.digits,
-    extension: typeof value.extension === 'string' ? value.extension : fallback.extension,
-    listenFrameIndex: typeof value.listenFrameIndex === 'number' ? value.listenFrameIndex : fallback.listenFrameIndex,
-    settingsThumbFrame: typeof value.settingsThumbFrame === 'number' ? value.settingsThumbFrame : fallback.settingsThumbFrame,
-  }
 }
 
 function mergeHomeMedia(value: unknown): HomeMediaConfig {
@@ -257,7 +218,6 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     defaultPetName: typeof value.defaultPetName === 'string' ? value.defaultPetName : FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
     homeHint: typeof value.homeHint === 'string' ? value.homeHint : FALLBACK_BOOTSTRAP_CONFIG.homeHint,
     homeMedia: mergeHomeMedia(value.homeMedia),
-    frameSequence: mergeFrameSequence(value.frameSequence),
     settings: {
       items: items.length ? items : FALLBACK_BOOTSTRAP_CONFIG.settings.items,
       miniAd: mergeMiniAd(settings.miniAd),

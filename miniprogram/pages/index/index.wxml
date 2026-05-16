@@ -11,15 +11,7 @@
       <button class="tiny-btn settings-entry" style="{{homeTopStyle}}" aria-label="打开设置" bindtap="openSettings">⚙</button>
 
       <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
-        <alpha-video
-          wx:if="{{petVideoUrl}}"
-          src="{{petVideoUrl}}"
-          autoplay="{{true}}"
-          loop="{{true}}"
-          width="630"
-          height="880"
-        ></alpha-video>
-        <image wx:else class="pet-frame" src="{{currentFrame}}" mode="aspectFit" show-menu-by-longpress="{{false}}" />
+        <canvas id="petVideoCanvas" type="webgl" class="pet-canvas"></canvas>
       </view>
 
       <view class="listen-area" aria-label="语音监听状态">

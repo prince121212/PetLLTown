@@ -167,17 +167,12 @@ button::after {
   padding: 0;
 }
 
-.home-page .pet-canvas,
-.home-page .pet-frame,
-.home-page alpha-video {
+.home-page .pet-canvas {
+  grid-area: 1 / 1;
   width: 630rpx;
   height: 880rpx;
   max-width: none;
   background: transparent;
-}
-
-.home-page .pet-frame {
-  position: absolute;
 }
 
 .home-page .listen-area {

@@ -84,7 +84,7 @@ async function main() {
           ok: bootstrap.ok === true,
           source: bootstrap.meta && bootstrap.meta.source,
           appName: bootstrap.data && bootstrap.data.appName,
-          frameBase: bootstrap.data && bootstrap.data.frameSequence && bootstrap.data.frameSequence.frameBase,
+          petVideoUrl: bootstrap.data && bootstrap.data.homeMedia && bootstrap.data.homeMedia.petVideoUrl,
         },
         getPetManifest: {
           ok: manifest.ok === true,

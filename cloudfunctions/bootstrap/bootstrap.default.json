@@ -6,7 +6,7 @@
   "defaultPetName": "小团子",
   "homeHint": "它在听你说话",
   "homeMedia": {
-    "petVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle.webm",
+    "petVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4",
     "listenOrbVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4"
   },
   "assets": {
@@ -15,16 +15,6 @@
     "storageDomain": "https://636c-cloud1-d0gz0y40r67b3198e-1396635429.tcb.qcloud.la",
     "cdnBase": "https://636c-cloud1-d0gz0y40r67b3198e-1396635429.tcb.qcloud.la/pets/",
     "temporaryFrameBase": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/"
-  },
-  "frameSequence": {
-    "frameTotal": 150,
-    "fps": 15,
-    "frameBase": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/",
-    "filePrefix": "frame_",
-    "digits": 4,
-    "extension": "png",
-    "listenFrameIndex": 30,
-    "settingsThumbFrame": 90
   },
   "home": {
     "hint": "它在听你说话"
