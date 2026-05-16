@@ -27,6 +27,10 @@ function mergeBootstrapConfig(base, override) {
       ...base.home,
       ...(override.home || {}),
     },
+    homeMedia: {
+      ...base.homeMedia,
+      ...(override.homeMedia || {}),
+    },
     settings: {
       ...base.settings,
       ...settings,
@@ -36,6 +40,7 @@ function mergeBootstrapConfig(base, override) {
         ...(settings.miniAd || {}),
       },
     },
+    rooms: Array.isArray(override.rooms) && override.rooms.length ? override.rooms : base.rooms,
     pets: Array.isArray(override.pets) && override.pets.length ? override.pets : base.pets,
     membership: {
       ...base.membership,

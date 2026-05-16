@@ -1,6 +1,20 @@
 <view class="app">
   <view wx:if="{{pageName === 'home'}}" class="page home-page">
-    <image class="home-wallpaper" src="./wallpaper.jpg" mode="aspectFill" />
+    <video
+      wx:if="{{backgroundMediaKind === 'video'}}"
+      class="home-wallpaper"
+      src="{{backgroundMediaUrl}}"
+      autoplay="{{true}}"
+      loop="{{true}}"
+      muted="{{true}}"
+      controls="{{false}}"
+      show-center-play-btn="{{false}}"
+      show-play-btn="{{false}}"
+      show-fullscreen-btn="{{false}}"
+      enable-progress-gesture="{{false}}"
+      object-fit="cover"
+    ></video>
+    <image wx:else class="home-wallpaper" src="{{backgroundMediaUrl}}" mode="aspectFill" show-menu-by-longpress="{{false}}" />
     <view class="safe" style="{{pageShellStyle}}">
       <view class="top" style="{{homeTopStyle}}">
         <view class="pet-title">
@@ -91,7 +105,7 @@
     </view>
   </view>
 
-  <view wx:else class="page picker-page">
+  <view wx:elif="{{pageName === 'petPicker'}}" class="page picker-page">
     <view class="picker-safe" style="{{pageShellStyle}}">
       <view class="picker-head">
         <view class="back-btn" aria-label="返回设置" bindtap="backSettings">
@@ -106,6 +120,7 @@
         circular="{{false}}"
         previous-margin="28rpx"
         next-margin="28rpx"
+        current="{{activePetIndex}}"
         bindchange="handlePetChange"
       >
         <block wx:for="{{pickerPets}}" wx:key="id">
@@ -128,6 +143,61 @@
       </view>
 
       <button class="select-btn" bindtap="selectPet">选择它</button>
+    </view>
+  </view>
+
+  <view wx:elif="{{pageName === 'roomPicker'}}" class="page picker-page">
+    <view class="picker-safe" style="{{pageShellStyle}}">
+      <view class="picker-head">
+        <view class="back-btn" aria-label="返回设置" bindtap="backSettings">
+          <text class="back-icon">‹</text>
+        </view>
+        <text class="page-title">更换房间</text>
+        <view class="tiny-placeholder"></view>
+      </view>
+
+      <swiper
+        class="pet-swiper"
+        circular="{{false}}"
+        previous-margin="28rpx"
+        next-margin="28rpx"
+        current="{{activeRoomIndex}}"
+        bindchange="handleRoomChange"
+      >
+        <block wx:for="{{pickerRooms}}" wx:key="id">
+          <swiper-item>
+            <view class="pet-option">
+              <view class="pet-photo room-photo">
+                <video
+                  wx:if="{{item.kind === 'video'}}"
+                  class="picker-room"
+                  src="{{item.previewUrl}}"
+                  autoplay="{{true}}"
+                  loop="{{true}}"
+                  muted="{{true}}"
+                  controls="{{false}}"
+                  show-center-play-btn="{{false}}"
+                  show-play-btn="{{false}}"
+                  show-fullscreen-btn="{{false}}"
+                  enable-progress-gesture="{{false}}"
+                  object-fit="cover"
+                ></video>
+                <image wx:else class="picker-room" src="{{item.previewUrl}}" mode="aspectFill" show-menu-by-longpress="{{false}}" />
+              </view>
+              <text class="picker-name">{{item.name}}</text>
+              <text class="picker-subtitle">{{item.subtitle}}</text>
+            </view>
+          </swiper-item>
+        </block>
+      </swiper>
+
+      <view class="picker-dots">
+        <block wx:for="{{rooms}}" wx:key="id">
+          <view class="dot {{index === activeRoomIndex ? 'active' : ''}}"></view>
+        </block>
+      </view>
+
+      <button class="select-btn" bindtap="selectRoom">选择它</button>
     </view>
   </view>
 </view>

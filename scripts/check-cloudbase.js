@@ -84,7 +84,15 @@ async function main() {
           ok: bootstrap.ok === true,
           source: bootstrap.meta && bootstrap.meta.source,
           appName: bootstrap.data && bootstrap.data.appName,
+          backgroundVideoUrl: bootstrap.data && bootstrap.data.homeMedia && bootstrap.data.homeMedia.backgroundVideoUrl,
           petVideoUrl: bootstrap.data && bootstrap.data.homeMedia && bootstrap.data.homeMedia.petVideoUrl,
+          defaultRoomId: bootstrap.data && bootstrap.data.defaultRoomId,
+          rooms: bootstrap.data && bootstrap.data.rooms && bootstrap.data.rooms.map((room) => ({
+            id: room.id,
+            name: room.name,
+            kind: room.kind,
+            mediaUrl: room.mediaUrl,
+          })),
         },
         getPetManifest: {
           ok: manifest.ok === true,

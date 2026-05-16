@@ -121,6 +121,7 @@ button::after {
   width: 100%;
   height: 100%;
   z-index: 0;
+  pointer-events: none;
 }
 
 .home-page .safe {
@@ -469,6 +470,16 @@ button::after {
 .picker-pet {
   width: 92%;
   height: 78%;
+}
+
+.room-photo {
+  border-radius: 18rpx;
+}
+
+.picker-room {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .picker-name {

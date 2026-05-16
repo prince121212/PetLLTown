@@ -3,9 +3,11 @@
   "configVersion": "2026-05-15-bootstrap-001",
   "appName": "宠物小小镇",
   "defaultPetId": "xiaotuanzi",
+  "defaultRoomId": "early-summer-breeze",
   "defaultPetName": "小团子",
   "homeHint": "它在听你说话",
   "homeMedia": {
+    "backgroundVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4",
     "petVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4",
     "listenOrbVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4"
   },
@@ -28,6 +30,14 @@
         "subtitle": "猫、狗、鸟、IP 形象包",
         "kind": "link",
         "target": "petPicker"
+      },
+      {
+        "id": "room",
+        "icon": "⌂",
+        "title": "更换房间",
+        "subtitle": "土星奇旅、初夏之风",
+        "kind": "link",
+        "target": "roomPicker"
       },
       {
         "id": "sound",
@@ -59,6 +69,24 @@
       "copy": "让小团子一直记得你"
     }
   },
+  "rooms": [
+    {
+      "id": "saturn-journey",
+      "name": "土星奇旅",
+      "subtitle": "静态星球小屋",
+      "kind": "image",
+      "mediaUrl": "/pages/index/wallpaper.jpg",
+      "enabled": true
+    },
+    {
+      "id": "early-summer-breeze",
+      "name": "初夏之风",
+      "subtitle": "林中小屋视频",
+      "kind": "video",
+      "mediaUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4",
+      "enabled": true
+    }
+  ],
   "pets": [
     {
       "id": "xiaotuanzi",

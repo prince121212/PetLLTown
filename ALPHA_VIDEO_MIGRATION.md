@@ -7,7 +7,6 @@ The homepage pet stage now uses only one rendering path:
 1. `wx.createVideoDecoder()` decodes a standard H.264 MP4.
 2. The decoded frame is uploaded to `canvas#petVideoCanvas` as a WebGL texture.
 3. A fragment shader reads RGB from the left half of the frame and alpha from the right half.
-4. The same shader can sample the homepage wallpaper inside the WebGL canvas before compositing the pet. This avoids a black rectangle if the mini program runtime treats the WebGL canvas layer as opaque.
 
 The old PNG frame animation fallback has been removed from the homepage render path. The old `components/alpha-video` component has also been removed because hidden native `<video>` plus Canvas `drawImage` was not reliable enough in the mini program runtime.
 
@@ -40,7 +39,6 @@ Use the console logs in `miniprogram/pages/index/index.ts` to verify the actual 
 - `alpha video decoder started`: decoder accepted the file.
 - `alpha video first frame`: frame dimensions and byte length.
 - `alpha video mask samples`: confirms the right half of the MP4 contains usable black/white alpha-mask values.
-- `alpha video background texture ready`: confirms the wallpaper texture was loaded for in-canvas compositing. This is not the old PNG frame fallback.
 
 For the current shader path to be valid, the first frame log should show `byteLength === width * height * 4`. If it logs `alpha video frame is not RGBA sized`, `getFrameData()` is returning a non-RGBA buffer and the renderer needs a YUV/NV12 upload path instead of the current RGBA texture upload.
 

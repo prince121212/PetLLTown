@@ -1,9 +1,9 @@
 import {
   BootstrapFunctionResult,
   FALLBACK_BOOTSTRAP_CONFIG,
-  HomeMediaConfig,
   PageName,
   PetOption,
+  RoomOption,
   SettingItem,
   normalizeBootstrapConfig,
 } from '../../config/bootstrap'
@@ -18,11 +18,15 @@ interface PageData {
   pageShellStyle: string
   homeTopStyle: string
   homeStageStyle: string
+  backgroundMediaKind: RoomOption['kind']
+  backgroundMediaUrl: string
   listenOrbVideoUrl: string
   listenFrame: string
   settingsThumb: string
   pets: PetOption[]
   pickerPets: Array<PetOption & { frame: string }>
+  rooms: RoomOption[]
+  pickerRooms: Array<RoomOption & { previewUrl: string; resolvedMediaUrl: string }>
   settings: SettingItem[]
   miniAd: {
     enabled: boolean
@@ -34,6 +38,7 @@ interface PageData {
   transcribedText: string
   petReply: string
   activePetIndex: number
+  activeRoomIndex: number
 }
 
 interface VoiceTranscribeResult {
@@ -206,13 +211,6 @@ interface AlphaVideoSplit {
   alphaHeight: number
 }
 
-interface TextureRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 interface PetVideoDecoder {
   getFrameData(): PetVideoFrameData | null | Promise<PetVideoFrameData | null>
   on(eventName: 'start' | 'stop' | 'seek' | 'bufferchange' | 'ended', callback: (...args: unknown[]) => void): void
@@ -227,15 +225,11 @@ interface AlphaVideoProgram {
   positionBuffer: WebGLHandle
   texCoordBuffer: WebGLHandle
   texture: WebGLHandle
-  backgroundTexture: WebGLHandle
   positionLocation: number
   texCoordLocation: number
   samplerLocation: WebGLHandle
-  backgroundSamplerLocation: WebGLHandle
   rgbRectLocation: WebGLHandle
   alphaRectLocation: WebGLHandle
-  backgroundRectLocation: WebGLHandle
-  hasBackgroundLocation: WebGLHandle
 }
 
 let petVideoCanvas: PetVideoCanvasNode | null = null
@@ -252,9 +246,8 @@ let petVideoFirstFrameLogged = false
 let petVideoFrameShapeWarned = false
 let petVideoFramePending = false
 let petVideoAlphaSamplesLogged = false
-let petVideoBackgroundReady = false
-let petVideoBackgroundRect: TextureRect = { x: 0, y: 0, width: 1, height: 1 }
 let activePetVideoUrl = ''
+let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
 let recorder: WechatMiniprogram.RecorderManager | null = null
 let recorderReady = false
@@ -277,7 +270,6 @@ const RECORDER_STOP_FALLBACK_MS = 1800
 const REALTIME_FRAME_SIZE_KB = 4
 const ALPHA_VIDEO_START_TIMEOUT_MS = 5000
 const RGBA_BYTES_PER_PIXEL = 4
-const HOME_WALLPAPER_SRC = '/pages/index/wallpaper.jpg'
 const ALPHA_VIDEO_VERTEX_SHADER = `
 attribute vec2 a_position;
 attribute vec2 a_texCoord;
@@ -291,11 +283,8 @@ void main() {
 const ALPHA_VIDEO_FRAGMENT_SHADER = `
 precision mediump float;
 uniform sampler2D u_texture;
-uniform sampler2D u_backgroundTexture;
 uniform vec4 u_rgbRect;
 uniform vec4 u_alphaRect;
-uniform vec4 u_backgroundRect;
-uniform float u_hasBackground;
 varying vec2 v_texCoord;
 
 vec2 mapRect(vec4 rect, vec2 uv) {
@@ -305,11 +294,8 @@ vec2 mapRect(vec4 rect, vec2 uv) {
 void main() {
   vec4 color = texture2D(u_texture, mapRect(u_rgbRect, v_texCoord));
   vec4 mask = texture2D(u_texture, mapRect(u_alphaRect, v_texCoord));
-  vec4 background = texture2D(u_backgroundTexture, mapRect(u_backgroundRect, v_texCoord));
   float alpha = mask.r;
-  vec4 transparentPet = vec4(color.rgb * alpha, alpha);
-  vec4 compositedPet = vec4(mix(background.rgb, color.rgb, alpha), 1.0);
-  gl_FragColor = mix(transparentPet, compositedPet, u_hasBackground);
+  gl_FragColor = vec4(color.rgb * alpha, alpha);
 }
 `
 
@@ -320,30 +306,57 @@ function buildPickerPets(pets: PetOption[]): Array<PetOption & { frame: string }
   }))
 }
 
+function buildPickerRooms(
+  rooms: RoomOption[],
+  urlMap: Record<string, string> = {},
+): Array<RoomOption & { previewUrl: string; resolvedMediaUrl: string }> {
+  return rooms.map((room) => {
+    const resolvedMediaUrl = urlMap[room.mediaUrl] || room.mediaUrl
+    const previewSource = room.thumbUrl || room.mediaUrl
+
+    return {
+      ...room,
+      previewUrl: urlMap[previewSource] || previewSource,
+      resolvedMediaUrl,
+    }
+  })
+}
+
 function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value) && typeof (value as Promise<unknown>).then === 'function'
 }
 
 function buildPageData(config = bootstrapConfig): Partial<PageData> {
   const pets = config.pets.filter((pet) => pet.enabled !== false)
+  const rooms = config.rooms.filter((room) => room.enabled !== false)
   const activePet = pets.find((pet) => pet.id === config.defaultPetId) || pets[0]
+  const activeRoom = rooms.find((room) => room.id === config.defaultRoomId) || rooms[0]
   const petName = activePet ? activePet.name : config.defaultPetName
   activePetVideoUrl = (activePet && activePet.videoUrl) || config.homeMedia.petVideoUrl
+  activeRoomId = activeRoom ? activeRoom.id : ''
 
   return {
     appName: config.appName,
     petName,
     homeHint: config.homeHint,
+    backgroundMediaKind: activeRoom ? activeRoom.kind : 'video',
+    backgroundMediaUrl: activeRoom ? activeRoom.mediaUrl : config.homeMedia.backgroundVideoUrl,
     listenOrbVideoUrl: config.homeMedia.listenOrbVideoUrl,
     listenFrame: (activePet && activePet.listenFrameUrl) || '',
     settingsThumb: (activePet && activePet.thumbUrl) || '',
     pets,
     pickerPets: buildPickerPets(pets),
+    rooms,
+    pickerRooms: buildPickerRooms(rooms),
     settings: config.settings.items,
     miniAd: config.settings.miniAd,
     activePetIndex: Math.max(
       0,
       pets.findIndex((pet) => pet.id === config.defaultPetId),
+    ),
+    activeRoomIndex: Math.max(
+      0,
+      rooms.findIndex((room) => room.id === config.defaultRoomId),
     ),
   }
 }
@@ -395,11 +408,15 @@ Component({
     pageShellStyle: '',
     homeTopStyle: '',
     homeStageStyle: '',
+    backgroundMediaKind: FALLBACK_BOOTSTRAP_CONFIG.rooms[1] && FALLBACK_BOOTSTRAP_CONFIG.rooms[1].kind ? FALLBACK_BOOTSTRAP_CONFIG.rooms[1].kind : 'video',
+    backgroundMediaUrl: FALLBACK_BOOTSTRAP_CONFIG.rooms[1] && FALLBACK_BOOTSTRAP_CONFIG.rooms[1].mediaUrl ? FALLBACK_BOOTSTRAP_CONFIG.rooms[1].mediaUrl : FALLBACK_BOOTSTRAP_CONFIG.homeMedia.backgroundVideoUrl,
     listenOrbVideoUrl: FALLBACK_BOOTSTRAP_CONFIG.homeMedia.listenOrbVideoUrl,
     listenFrame: FALLBACK_BOOTSTRAP_CONFIG.pets[0] && FALLBACK_BOOTSTRAP_CONFIG.pets[0].listenFrameUrl ? FALLBACK_BOOTSTRAP_CONFIG.pets[0].listenFrameUrl : '',
     settingsThumb: FALLBACK_BOOTSTRAP_CONFIG.pets[0] && FALLBACK_BOOTSTRAP_CONFIG.pets[0].thumbUrl ? FALLBACK_BOOTSTRAP_CONFIG.pets[0].thumbUrl : '',
     pets: FALLBACK_BOOTSTRAP_CONFIG.pets,
     pickerPets: buildPickerPets(FALLBACK_BOOTSTRAP_CONFIG.pets),
+    rooms: FALLBACK_BOOTSTRAP_CONFIG.rooms,
+    pickerRooms: buildPickerRooms(FALLBACK_BOOTSTRAP_CONFIG.rooms),
     settings: FALLBACK_BOOTSTRAP_CONFIG.settings.items,
     miniAd: FALLBACK_BOOTSTRAP_CONFIG.settings.miniAd,
     voiceStatus: 'idle',
@@ -407,6 +424,7 @@ Component({
     transcribedText: '',
     petReply: '',
     activePetIndex: 0,
+    activeRoomIndex: 1,
   } as PageData,
 
   lifetimes: {
@@ -558,46 +576,9 @@ Component({
               dpr,
               contextAttributes: typeof gl.getContextAttributes === 'function' ? gl.getContextAttributes() : null,
             })
-            this.loadPetCanvasBackground(canvas, gl, petVideoProgram, {
-              width: target.width,
-              height: target.height,
-              left: typeof target.left === 'number' ? target.left : null,
-              top: typeof target.top === 'number' ? target.top : null,
-            })
             this.startPetRenderer()
           })
       })
-    },
-
-    loadPetCanvasBackground(
-      canvas: PetVideoCanvasNode,
-      gl: PetWebGLRenderingContext,
-      resources: AlphaVideoProgram,
-      canvasRect: { width: number; height: number; left: number | null; top: number | null },
-    ) {
-      const image = canvas.createImage()
-      petVideoBackgroundReady = false
-      petVideoBackgroundRect = { x: 0, y: 0, width: 1, height: 1 }
-
-      image.onload = () => {
-        petVideoBackgroundRect = this.computeStageBackgroundRect(canvasRect, image.width, image.height)
-        gl.activeTexture(gl.TEXTURE0 + 1)
-        gl.bindTexture(gl.TEXTURE_2D, resources.backgroundTexture)
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image)
-        petVideoBackgroundReady = true
-        console.info('[index] alpha video background texture ready:', {
-          imageWidth: image.width,
-          imageHeight: image.height,
-          backgroundRect: petVideoBackgroundRect,
-        })
-      }
-
-      image.onerror = (error) => {
-        petVideoBackgroundReady = false
-        console.warn('[index] alpha video background texture failed:', error)
-      }
-
-      image.src = HOME_WALLPAPER_SRC
     },
 
     startPetRenderer() {
@@ -834,18 +815,9 @@ Component({
       gl.bindTexture(gl.TEXTURE_2D, resources.texture)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, frame.width, frame.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, petVideoFrameData)
       gl.uniform1i(resources.samplerLocation, 0)
-      gl.uniform1i(resources.backgroundSamplerLocation, 1)
 
       gl.uniform4f(resources.rgbRectLocation, split.rgbX, split.rgbY, split.rgbWidth, split.rgbHeight)
       gl.uniform4f(resources.alphaRectLocation, split.alphaX, split.alphaY, split.alphaWidth, split.alphaHeight)
-      gl.uniform4f(
-        resources.backgroundRectLocation,
-        petVideoBackgroundRect.x,
-        petVideoBackgroundRect.y,
-        petVideoBackgroundRect.width,
-        petVideoBackgroundRect.height,
-      )
-      gl.uniform1f(resources.hasBackgroundLocation, petVideoBackgroundReady ? 1 : 0)
 
       gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
@@ -874,30 +846,6 @@ Component({
         alphaY: 0.5,
         alphaWidth: 1,
         alphaHeight: 0.5,
-      }
-    },
-
-    computeStageBackgroundRect(
-      canvasRect: { width: number; height: number; left: number | null; top: number | null },
-      imageWidth: number,
-      imageHeight: number,
-    ): TextureRect {
-      const systemInfo = wx.getSystemInfoSync()
-      const viewportWidth = systemInfo.windowWidth || canvasRect.width
-      const viewportHeight = systemInfo.windowHeight || canvasRect.height
-      const canvasLeft = canvasRect.left === null ? (viewportWidth - canvasRect.width) / 2 : canvasRect.left
-      const canvasTop = canvasRect.top === null ? Math.max(0, (systemInfo.statusBarHeight || 0) + 77) : canvasRect.top
-      const wallpaperScale = Math.max(viewportWidth / imageWidth, viewportHeight / imageHeight)
-      const fittedWidth = imageWidth * wallpaperScale
-      const fittedHeight = imageHeight * wallpaperScale
-      const wallpaperLeft = (viewportWidth - fittedWidth) / 2
-      const wallpaperTop = (viewportHeight - fittedHeight) / 2
-
-      return {
-        x: (canvasLeft - wallpaperLeft) / fittedWidth,
-        y: (canvasTop - wallpaperTop) / fittedHeight,
-        width: canvasRect.width / fittedWidth,
-        height: canvasRect.height / fittedHeight,
       }
     },
 
@@ -947,25 +895,17 @@ Component({
       const positionBuffer = gl.createBuffer()
       const texCoordBuffer = gl.createBuffer()
       const texture = gl.createTexture()
-      const backgroundTexture = gl.createTexture()
       const samplerLocation = gl.getUniformLocation(program, 'u_texture')
-      const backgroundSamplerLocation = gl.getUniformLocation(program, 'u_backgroundTexture')
       const rgbRectLocation = gl.getUniformLocation(program, 'u_rgbRect')
       const alphaRectLocation = gl.getUniformLocation(program, 'u_alphaRect')
-      const backgroundRectLocation = gl.getUniformLocation(program, 'u_backgroundRect')
-      const hasBackgroundLocation = gl.getUniformLocation(program, 'u_hasBackground')
 
       if (
         !positionBuffer ||
         !texCoordBuffer ||
         !texture ||
-        !backgroundTexture ||
         !samplerLocation ||
-        !backgroundSamplerLocation ||
         !rgbRectLocation ||
-        !alphaRectLocation ||
-        !backgroundRectLocation ||
-        !hasBackgroundLocation
+        !alphaRectLocation
       ) {
         return null
       }
@@ -983,18 +923,9 @@ Component({
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-      gl.bindTexture(gl.TEXTURE_2D, backgroundTexture)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]))
 
       gl.useProgram(program)
       gl.uniform1i(samplerLocation, 0)
-      gl.uniform1i(backgroundSamplerLocation, 1)
-      gl.uniform4f(backgroundRectLocation, 0, 0, 1, 1)
-      gl.uniform1f(hasBackgroundLocation, 0)
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer)
       gl.enableVertexAttribArray(positionLocation)
       gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0)
@@ -1007,15 +938,11 @@ Component({
         positionBuffer,
         texCoordBuffer,
         texture,
-        backgroundTexture,
         positionLocation,
         texCoordLocation,
         samplerLocation,
-        backgroundSamplerLocation,
         rgbRectLocation,
         alphaRectLocation,
-        backgroundRectLocation,
-        hasBackgroundLocation,
       }
     },
 
@@ -1039,7 +966,7 @@ Component({
     applyBootstrapConfig(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
       bootstrapConfig = config
       this.setData(buildPageData(config))
-      this.resolveHomeMedia(config.homeMedia)
+      this.resolveHomeMedia(config)
       this.startPetRenderer()
     },
 
@@ -1064,10 +991,18 @@ Component({
       }
     },
 
-    async resolveHomeMedia(media: HomeMediaConfig) {
+    async resolveHomeMedia(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
       if (!wx.cloud) return
 
-      const cloudUrls = [media.listenOrbVideoUrl].filter((url) => url.startsWith('cloud://'))
+      const rooms = config.rooms.filter((room) => room.enabled !== false)
+      const roomUrls = rooms.reduce<string[]>((acc, room) => {
+        acc.push(room.mediaUrl)
+        if (room.thumbUrl) acc.push(room.thumbUrl)
+        return acc
+      }, [])
+      const cloudUrls = [config.homeMedia.listenOrbVideoUrl, ...roomUrls]
+        .filter((url) => url.startsWith('cloud://'))
+        .filter((url, index, list) => list.indexOf(url) === index)
 
       if (!cloudUrls.length) return
 
@@ -1087,8 +1022,13 @@ Component({
           return acc
         }, {})
 
+        const pickerRooms = buildPickerRooms(rooms, urlMap)
+        const selectedRoom = pickerRooms.find((room) => room.id === activeRoomId) || pickerRooms[0]
+
         this.setData({
-          listenOrbVideoUrl: urlMap[media.listenOrbVideoUrl] || media.listenOrbVideoUrl,
+          backgroundMediaUrl: selectedRoom ? selectedRoom.resolvedMediaUrl : this.data.backgroundMediaUrl,
+          listenOrbVideoUrl: urlMap[config.homeMedia.listenOrbVideoUrl] || config.homeMedia.listenOrbVideoUrl,
+          pickerRooms,
         })
       } catch (error) {
         console.warn('[index] resolve home media fallback:', error)
@@ -1117,6 +1057,10 @@ Component({
       this.setData({ activePetIndex: event.detail.current })
     },
 
+    handleRoomChange(event: WechatMiniprogram.SwiperChange) {
+      this.setData({ activeRoomIndex: event.detail.current })
+    },
+
     selectPet() {
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
@@ -1126,6 +1070,20 @@ Component({
         pageName: 'home',
       })
       this.startPetRenderer()
+    },
+
+    selectRoom() {
+      const selected = this.data.pickerRooms[this.data.activeRoomIndex] || this.data.pickerRooms[0]
+
+      if (!selected) return
+
+      activeRoomId = selected.id
+
+      this.setData({
+        backgroundMediaKind: selected.kind,
+        backgroundMediaUrl: selected.resolvedMediaUrl || selected.mediaUrl,
+        pageName: 'home',
+      })
     },
 
     async handleListenTouchStart() {

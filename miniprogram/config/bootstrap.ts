@@ -1,4 +1,4 @@
-export type PageName = 'home' | 'settings' | 'petPicker'
+export type PageName = 'home' | 'settings' | 'petPicker' | 'roomPicker'
 
 export interface PetOption {
   id: string
@@ -22,6 +22,16 @@ export interface SettingItem {
   enabled?: boolean
 }
 
+export interface RoomOption {
+  id: string
+  name: string
+  subtitle: string
+  kind: 'image' | 'video'
+  mediaUrl: string
+  thumbUrl?: string
+  enabled?: boolean
+}
+
 export interface MiniAdConfig {
   enabled: boolean
   title: string
@@ -29,6 +39,7 @@ export interface MiniAdConfig {
 }
 
 export interface HomeMediaConfig {
+  backgroundVideoUrl: string
   petVideoUrl: string
   listenOrbVideoUrl: string
 }
@@ -38,6 +49,7 @@ export interface BootstrapConfig {
   configVersion: string
   appName: string
   defaultPetId: string
+  defaultRoomId: string
   defaultPetName: string
   homeHint: string
   homeMedia: HomeMediaConfig
@@ -45,6 +57,7 @@ export interface BootstrapConfig {
     items: SettingItem[]
     miniAd: MiniAdConfig
   }
+  rooms: RoomOption[]
   pets: PetOption[]
 }
 
@@ -59,9 +72,11 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
   configVersion: 'local-fallback-2026-05-15',
   appName: '宠物小小镇',
   defaultPetId: 'xiaotuanzi',
+  defaultRoomId: 'early-summer-breeze',
   defaultPetName: '小团子',
   homeHint: '它在听你说话',
   homeMedia: {
+    backgroundVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4',
     petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
     listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
   },
@@ -74,6 +89,14 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
         subtitle: '猫、狗、鸟、IP 形象包',
         kind: 'link',
         target: 'petPicker',
+      },
+      {
+        id: 'room',
+        icon: '⌂',
+        title: '更换房间',
+        subtitle: '土星奇旅、初夏之风',
+        kind: 'link',
+        target: 'roomPicker',
       },
       {
         id: 'sound',
@@ -105,6 +128,24 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       copy: '让小团子一直记得你',
     },
   },
+  rooms: [
+    {
+      id: 'saturn-journey',
+      name: '土星奇旅',
+      subtitle: '静态星球小屋',
+      kind: 'image',
+      mediaUrl: '/pages/index/wallpaper.jpg',
+      enabled: true,
+    },
+    {
+      id: 'early-summer-breeze',
+      name: '初夏之风',
+      subtitle: '林中小屋视频',
+      kind: 'video',
+      mediaUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4',
+      enabled: true,
+    },
+  ],
   pets: [
     {
       id: 'xiaotuanzi',
@@ -168,6 +209,18 @@ function isPetOption(value: unknown): value is PetOption {
   )
 }
 
+function isRoomOption(value: unknown): value is RoomOption {
+  if (!isRecord(value)) return false
+
+  return (
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.subtitle === 'string' &&
+    (value.kind === 'image' || value.kind === 'video') &&
+    typeof value.mediaUrl === 'string'
+  )
+}
+
 function isSettingItem(value: unknown): value is SettingItem {
   if (!isRecord(value)) return false
 
@@ -186,6 +239,7 @@ function mergeHomeMedia(value: unknown): HomeMediaConfig {
   if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.homeMedia
 
   return {
+    backgroundVideoUrl: typeof value.backgroundVideoUrl === 'string' ? value.backgroundVideoUrl : FALLBACK_BOOTSTRAP_CONFIG.homeMedia.backgroundVideoUrl,
     petVideoUrl: typeof value.petVideoUrl === 'string' ? value.petVideoUrl : FALLBACK_BOOTSTRAP_CONFIG.homeMedia.petVideoUrl,
     listenOrbVideoUrl: typeof value.listenOrbVideoUrl === 'string' ? value.listenOrbVideoUrl : FALLBACK_BOOTSTRAP_CONFIG.homeMedia.listenOrbVideoUrl,
   }
@@ -206,6 +260,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
 
   const settings = isRecord(value.settings) ? value.settings : {}
   const pets = Array.isArray(value.pets) ? value.pets.filter(isPetOption) : FALLBACK_BOOTSTRAP_CONFIG.pets
+  const rooms = Array.isArray(value.rooms) ? value.rooms.filter(isRoomOption) : FALLBACK_BOOTSTRAP_CONFIG.rooms
   const items = Array.isArray(settings.items)
     ? settings.items.filter(isSettingItem)
     : FALLBACK_BOOTSTRAP_CONFIG.settings.items
@@ -215,6 +270,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     configVersion: typeof value.configVersion === 'string' ? value.configVersion : FALLBACK_BOOTSTRAP_CONFIG.configVersion,
     appName: typeof value.appName === 'string' ? value.appName : FALLBACK_BOOTSTRAP_CONFIG.appName,
     defaultPetId: typeof value.defaultPetId === 'string' ? value.defaultPetId : FALLBACK_BOOTSTRAP_CONFIG.defaultPetId,
+    defaultRoomId: typeof value.defaultRoomId === 'string' ? value.defaultRoomId : FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId,
     defaultPetName: typeof value.defaultPetName === 'string' ? value.defaultPetName : FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
     homeHint: typeof value.homeHint === 'string' ? value.homeHint : FALLBACK_BOOTSTRAP_CONFIG.homeHint,
     homeMedia: mergeHomeMedia(value.homeMedia),
@@ -222,6 +278,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
       items: items.length ? items : FALLBACK_BOOTSTRAP_CONFIG.settings.items,
       miniAd: mergeMiniAd(settings.miniAd),
     },
+    rooms: rooms.length ? rooms : FALLBACK_BOOTSTRAP_CONFIG.rooms,
     pets: pets.length ? pets : FALLBACK_BOOTSTRAP_CONFIG.pets,
   }
 }
