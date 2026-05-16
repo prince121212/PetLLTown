@@ -159,6 +159,17 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       enabled: true
     },
     {
+      id: 'danjuan',
+      name: '蛋卷',
+      subtitle: '眨眼撒娇',
+      frameOffset: 15,
+      manifestKey: 'danjuan/manifest.json',
+      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/videos/danjuan-idle-alpha-pack-h.mp4',
+      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/frames/frame_0030.png',
+      enabled: true
+    },
+    {
       id: 'buding',
       name: '布丁',
       subtitle: '活泼好奇',

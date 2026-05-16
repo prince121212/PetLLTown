@@ -15,7 +15,7 @@ const secretId = requiredEnv('TENCENTCLOUD_SECRET_ID')
 const secretKey = requiredEnv('TENCENTCLOUD_SECRET_KEY')
 const region = process.env.CLOUDBASE_REGION || 'ap-shanghai'
 const bootstrapConfig = readJson('cloudbase/configs/bootstrap.default.json')
-const petManifest = readJson('cloudbase/configs/pets/xiaotuanzi.manifest.json')
+const petManifests = readPetManifests()
 const seedDocuments = [
   {
     collection: 'app_configs',
@@ -27,9 +27,9 @@ const seedDocuments = [
       updatedBy: 'seed-cloudbase-data',
     },
   },
-  {
+  ...petManifests.map((petManifest) => ({
     collection: 'pets',
-    id: 'xiaotuanzi',
+    id: petManifest.petId,
     data: {
       enabled: true,
       name: petManifest.name,
@@ -37,7 +37,7 @@ const seedDocuments = [
       updatedAt: new Date().toISOString(),
       updatedBy: 'seed-cloudbase-data',
     },
-  },
+  })),
 ]
 const seedCollections = ['app_configs', 'pets', 'voice_logs', 'ai_logs']
 
@@ -67,6 +67,16 @@ function requiredEnv(name) {
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'))
+}
+
+function readPetManifests() {
+  const petConfigDir = path.join(root, 'cloudbase/configs/pets')
+
+  return fs
+    .readdirSync(petConfigDir)
+    .filter((fileName) => fileName.endsWith('.manifest.json'))
+    .map((fileName) => JSON.parse(fs.readFileSync(path.join(petConfigDir, fileName), 'utf8')))
+    .filter((manifest) => manifest && typeof manifest.petId === 'string')
 }
 
 async function ensureCollection(collection) {

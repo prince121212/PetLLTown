@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "2026-05-17-danjuan-001",
+  "petId": "danjuan",
+  "name": "蛋卷",
+  "defaultState": "idle",
+  "canvas": {
+    "width": 720,
+    "height": 960,
+    "anchorX": 0.5,
+    "anchorY": 0.94,
+    "safeArea": {
+      "x": 36,
+      "y": 48,
+      "width": 648,
+      "height": 864
+    }
+  },
+  "assets": {
+    "baseUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/frames/",
+    "audioBaseUrl": ""
+  },
+  "actions": [
+    {
+      "id": "idle",
+      "type": "loop",
+      "label": "待机",
+      "fps": 24,
+      "frameCount": 122,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 1,
+      "endIndex": 122,
+      "connectAt": [1, 30, 60, 90, 122],
+      "next": ["idle", "listen"]
+    },
+    {
+      "id": "listen",
+      "type": "loop",
+      "label": "倾听",
+      "fps": 24,
+      "frameCount": 40,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 30,
+      "endIndex": 69,
+      "connectAt": [30, 50, 69],
+      "next": ["idle"]
+    }
+  ],
+  "sounds": [],
+  "personality": {
+    "tone": "warm",
+    "replyStyle": "短句、亲近、像一只会眨眼撒娇的小狗",
+    "traits": ["亲人", "爱撒娇", "会认真看着你"]
+  }
+}

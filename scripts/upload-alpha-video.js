@@ -42,6 +42,7 @@ async function uploadVideo(sourceFile, shouldApply = false) {
   const secretKey = env.TENCENTCLOUD_SECRET_KEY
   const bucket = env.COS_BUCKET
   const region = env.COS_REGION
+  const envId = env.CLOUDBASE_ENV_ID || 'cloud1-d0gz0y40r67b3198e'
 
   if (!secretId || !secretKey || !bucket || !region) {
     console.error('❌ 缺少必要的环境变量')
@@ -66,10 +67,13 @@ async function uploadVideo(sourceFile, shouldApply = false) {
   console.log(`🌍 区域: ${region}`)
   console.log('═'.repeat(50))
 
+  const petId = readArgValue('--pet') || 'xiaotuanzi'
+  const actionId = readArgValue('--action') || 'idle'
+
   // 目标路径
   const fileName = path.basename(sourceFile)
-  const targetPath = `pets/xiaotuanzi/actions/idle/videos/${fileName}`
-  const cloudUrl = `cloud://cloud1-d0gz0y40r67b3198e.${bucket}/${targetPath}`
+  const targetPath = `pets/${petId}/actions/${actionId}/videos/${fileName}`
+  const cloudUrl = `cloud://${envId}.${bucket}/${targetPath}`
 
   console.log(`\n📍 目标路径: ${targetPath}`)
   console.log(`☁️  云存储URL: ${cloudUrl}`)
@@ -129,6 +133,11 @@ async function uploadVideo(sourceFile, shouldApply = false) {
     console.error(error.message)
     process.exit(1)
   }
+}
+
+function readArgValue(name) {
+  const arg = process.argv.find((value) => value.startsWith(`${name}=`))
+  return arg ? arg.slice(name.length + 1) : ''
 }
 
 // 主程序
