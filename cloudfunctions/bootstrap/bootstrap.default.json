@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "configVersion": "2026-05-15-bootstrap-001",
+  "appName": "宠物小小镇",
+  "defaultPetId": "xiaotuanzi",
+  "defaultPetName": "小团子",
+  "homeHint": "它在听你说话",
+  "homeMedia": {
+    "petVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle.webm",
+    "listenOrbVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4"
+  },
+  "assets": {
+    "cloudEnvId": "cloud1-d0gz0y40r67b3198e",
+    "storageBucket": "636c-cloud1-d0gz0y40r67b3198e-1396635429",
+    "storageDomain": "https://636c-cloud1-d0gz0y40r67b3198e-1396635429.tcb.qcloud.la",
+    "cdnBase": "https://636c-cloud1-d0gz0y40r67b3198e-1396635429.tcb.qcloud.la/pets/",
+    "temporaryFrameBase": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/"
+  },
+  "frameSequence": {
+    "frameTotal": 150,
+    "fps": 15,
+    "frameBase": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/",
+    "filePrefix": "frame_",
+    "digits": 4,
+    "extension": "png",
+    "listenFrameIndex": 30,
+    "settingsThumbFrame": 90
+  },
+  "home": {
+    "hint": "它在听你说话"
+  },
+  "settings": {
+    "items": [
+      {
+        "id": "pet",
+        "icon": "◌",
+        "title": "更换宠物",
+        "subtitle": "猫、狗、鸟、IP 形象包",
+        "kind": "link",
+        "target": "petPicker"
+      },
+      {
+        "id": "sound",
+        "icon": "♪",
+        "title": "声音反馈",
+        "subtitle": "叫声、呼吸、扑扇、玩具音",
+        "kind": "switch",
+        "enabled": true
+      },
+      {
+        "id": "voice",
+        "icon": "⌁",
+        "title": "语音监听",
+        "subtitle": "只在前台打开时工作",
+        "kind": "switch",
+        "enabled": true
+      },
+      {
+        "id": "privacy",
+        "icon": "◎",
+        "title": "隐私与权限",
+        "subtitle": "麦克风、通知、数据说明",
+        "kind": "link"
+      }
+    ],
+    "miniAd": {
+      "enabled": true,
+      "title": "宠物小小镇会员",
+      "copy": "让小团子一直记得你"
+    }
+  },
+  "pets": [
+    {
+      "id": "xiaotuanzi",
+      "name": "小团子",
+      "subtitle": "安静黏人",
+      "frameOffset": 1,
+      "manifestKey": "xiaotuanzi/manifest.json",
+      "enabled": true
+    },
+    {
+      "id": "buding",
+      "name": "布丁",
+      "subtitle": "活泼好奇",
+      "frameOffset": 25,
+      "manifestKey": "buding/manifest.json",
+      "enabled": true
+    },
+    {
+      "id": "naigai",
+      "name": "奶盖",
+      "subtitle": "爱撒娇",
+      "frameOffset": 50,
+      "manifestKey": "naigai/manifest.json",
+      "enabled": true
+    },
+    {
+      "id": "doudou",
+      "name": "豆豆",
+      "subtitle": "喜欢陪你发呆",
+      "frameOffset": 75,
+      "manifestKey": "doudou/manifest.json",
+      "enabled": true
+    }
+  ],
+  "membership": {
+    "mode": "manualAnnual",
+    "trialDays": 0,
+    "memory": {
+      "freeRetentionDays": 7,
+      "annualMemberRetention": "permanent"
+    },
+    "plans": [
+      {
+        "id": "annual_intro",
+        "title": "首年会员",
+        "priceFen": 990,
+        "renewPriceFen": 1990,
+        "currency": "CNY"
+      }
+    ]
+  },
+  "ads": {
+    "home": {
+      "enabled": false
+    },
+    "settingsMiniAd": {
+      "enabled": true
+    }
+  },
+  "featureFlags": {
+    "cloudBootstrap": true,
+    "petPicker": true,
+    "voiceInput": false,
+    "aiResponse": false,
+    "payments": false
+  }
+}

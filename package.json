@@ -1,0 +1,28 @@
+{
+  "name": "pet-little-town",
+  "version": "1.0.0",
+  "description": "宠物小小镇微信小程序",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "sync:bootstrap": "node scripts/sync-bootstrap-config.js",
+    "sync:manifests": "node scripts/sync-pet-manifests.js",
+    "upload:frames": "node scripts/upload-pet-frames.js",
+    "seed:cloudbase": "node scripts/seed-cloudbase-data.js",
+    "check:cloudbase": "node scripts/check-cloudbase.js",
+    "set:voice-env": "node scripts/set-voice-env.js",
+    "deploy:voice": "node scripts/deploy-voice-function.js",
+    "deploy:asr-realtime": "node scripts/deploy-asr-realtime-function.js",
+    "deploy:ai": "node scripts/deploy-ai-function.js",
+    "upload:media": "node scripts/upload-media-assets.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "",
+  "devDependencies": {
+    "@cloudbase/manager-node": "^5.4.0",
+    "@cloudbase/node-sdk": "^3.18.1",
+    "miniprogram-api-typings": "^2.8.3-1",
+    "tencentcloud-sdk-nodejs-asr": "^4.1.205",
+    "typescript": "^5.4.5"
+  }
+}

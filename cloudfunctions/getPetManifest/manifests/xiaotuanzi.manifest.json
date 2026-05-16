@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "2026-05-15-xiaotuanzi-001",
+  "petId": "xiaotuanzi",
+  "name": "小团子",
+  "defaultState": "idle",
+  "canvas": {
+    "width": 1024,
+    "height": 1024,
+    "anchorX": 0.5,
+    "anchorY": 0.92,
+    "safeArea": {
+      "x": 96,
+      "y": 80,
+      "width": 832,
+      "height": 864
+    }
+  },
+  "assets": {
+    "baseUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/",
+    "audioBaseUrl": ""
+  },
+  "actions": [
+    {
+      "id": "idle",
+      "type": "loop",
+      "label": "待机",
+      "fps": 15,
+      "frameCount": 150,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 1,
+      "endIndex": 150,
+      "connectAt": [1, 30, 60, 90, 120, 150],
+      "next": ["idle", "listen"]
+    },
+    {
+      "id": "listen",
+      "type": "loop",
+      "label": "倾听",
+      "fps": 15,
+      "frameCount": 36,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 24,
+      "endIndex": 59,
+      "connectAt": [30, 45, 59],
+      "next": ["idle", "happy"]
+    },
+    {
+      "id": "happy",
+      "type": "transition",
+      "label": "开心回应",
+      "fps": 15,
+      "frameCount": 40,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 60,
+      "endIndex": 99,
+      "connectAt": [99],
+      "next": ["idle"]
+    },
+    {
+      "id": "sleepy",
+      "type": "loop",
+      "label": "困困",
+      "fps": 12,
+      "frameCount": 40,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 100,
+      "endIndex": 139,
+      "connectAt": [100, 120, 139],
+      "next": ["idle"]
+    }
+  ],
+  "sounds": [],
+  "personality": {
+    "tone": "soft",
+    "replyStyle": "短句、温柔、像一只安静黏人的小宠物",
+    "traits": ["安静", "黏人", "会认真听人说话"]
+  }
+}

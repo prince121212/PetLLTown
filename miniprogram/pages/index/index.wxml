@@ -1,0 +1,133 @@
+<view class="app">
+  <view wx:if="{{pageName === 'home'}}" class="page home-page">
+    <view class="safe" style="{{pageShellStyle}}">
+      <view class="top" style="{{homeTopStyle}}">
+        <view class="pet-title">
+          <text class="title">{{petName}}</text>
+          <text class="subtitle">{{homeHint}}</text>
+        </view>
+      </view>
+      <button class="tiny-btn settings-entry" style="{{homeTopStyle}}" aria-label="打开设置" bindtap="openSettings">⚙</button>
+
+      <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
+        <canvas id="petCanvas" type="2d" class="pet-canvas"></canvas>
+        <image wx:if="{{!petCanvasReady}}" class="pet-frame" src="{{currentFrame}}" mode="aspectFit" show-menu-by-longpress="{{false}}" />
+      </view>
+
+      <view class="listen-area" aria-label="语音监听状态">
+        <text class="voice-hint">{{voiceHint}}</text>
+        <text wx:if="{{transcribedText}}" class="voice-text">{{transcribedText}}</text>
+        <text wx:if="{{petReply}}" class="pet-reply">{{petReply}}</text>
+        <view
+          class="listen-orb {{voiceStatus}}"
+          bindtouchstart="handleListenTouchStart"
+          bindtouchend="handleListenTouchEnd"
+          bindtouchcancel="handleListenTouchEnd"
+        >
+          <video
+            class="listen-video"
+            src="{{listenOrbVideoUrl}}"
+            poster="{{listenFrame}}"
+            autoplay="{{true}}"
+            loop="{{true}}"
+            muted="{{true}}"
+            controls="{{false}}"
+            show-center-play-btn="{{false}}"
+            show-play-btn="{{false}}"
+            show-fullscreen-btn="{{false}}"
+            enable-progress-gesture="{{false}}"
+            object-fit="cover"
+            catchtouchstart="handleListenTouchStart"
+            catchtouchend="handleListenTouchEnd"
+            catchtouchcancel="handleListenTouchEnd"
+          ></video>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:elif="{{pageName === 'settings'}}" class="page settings-page">
+    <view class="safe" style="{{pageShellStyle}}">
+      <view class="top centered">
+        <view class="back-btn" aria-label="返回首页" bindtap="backHome">
+          <text class="back-icon">‹</text>
+        </view>
+        <text class="page-title">设置</text>
+        <view class="tiny-placeholder"></view>
+      </view>
+
+      <view class="settings-main">
+        <view class="pet-card">
+          <image class="pet-thumb" src="{{settingsThumb}}" mode="aspectFit" />
+          <text class="pet-card-name">{{petName}}</text>
+        </view>
+
+        <view class="setting-list">
+          <block wx:for="{{settings}}" wx:key="id">
+            <view
+              class="setting-row"
+              data-target="{{item.target}}"
+              bindtap="handleSettingTap"
+              aria-label="{{item.title}}"
+            >
+              <view class="setting-icon">{{item.icon}}</view>
+              <view class="setting-copy">
+                <text class="setting-title">{{item.title}}</text>
+                <text class="setting-subtitle">{{item.subtitle}}</text>
+              </view>
+              <view wx:if="{{item.kind === 'switch'}}" class="switch {{item.enabled ? 'active' : ''}}">
+                <view class="switch-dot"></view>
+              </view>
+              <view wx:else class="chevron">›</view>
+            </view>
+          </block>
+        </view>
+
+        <view wx:if="{{miniAd.enabled}}" class="mini-ad">
+          <text class="mini-ad-title">{{miniAd.title}}</text>
+          <text class="mini-ad-copy">{{miniAd.copy}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="page picker-page">
+    <view class="picker-safe" style="{{pageShellStyle}}">
+      <view class="picker-head">
+        <view class="back-btn" aria-label="返回设置" bindtap="backSettings">
+          <text class="back-icon">‹</text>
+        </view>
+        <text class="page-title">更换宠物</text>
+        <view class="tiny-placeholder"></view>
+      </view>
+
+      <swiper
+        class="pet-swiper"
+        circular="{{false}}"
+        previous-margin="28rpx"
+        next-margin="28rpx"
+        bindchange="handlePetChange"
+      >
+        <block wx:for="{{pickerPets}}" wx:key="id">
+          <swiper-item>
+            <view class="pet-option">
+              <view class="pet-photo">
+                <image class="picker-pet" src="{{item.frame}}" mode="aspectFit" show-menu-by-longpress="{{false}}" />
+              </view>
+              <text class="picker-name">{{item.name}}</text>
+              <text class="picker-subtitle">{{item.subtitle}}</text>
+            </view>
+          </swiper-item>
+        </block>
+      </swiper>
+
+      <view class="picker-dots">
+        <block wx:for="{{pets}}" wx:key="id">
+          <view class="dot {{index === activePetIndex ? 'active' : ''}}"></view>
+        </block>
+      </view>
+
+      <button class="select-btn" bindtap="selectPet">选择它</button>
+    </view>
+  </view>
+</view>

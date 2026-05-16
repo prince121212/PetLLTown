@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+project.private.config.json
+node_modules/
+miniprogram_npm/
+dist/
+build/
+.DS_Store
+*.log

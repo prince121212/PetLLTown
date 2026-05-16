@@ -1,0 +1,9 @@
+{
+  "name": "get-pet-manifest",
+  "version": "1.0.0",
+  "description": "PetLLTown pet manifest cloud function",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
