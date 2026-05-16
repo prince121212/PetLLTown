@@ -236,6 +236,7 @@ let petVideoCanvas: PetVideoCanvasNode | null = null
 let petVideoGl: PetWebGLRenderingContext | null = null
 let petVideoProgram: AlphaVideoProgram | null = null
 let petVideoDecoder: PetVideoDecoder | null = null
+let petVideoCanvasInitializing = false
 let petVideoFrameRequest = 0
 let petVideoStartTimer = 0
 let petVideoFrameData: Uint8Array | null = null
@@ -246,6 +247,7 @@ let petVideoFirstFrameLogged = false
 let petVideoFrameShapeWarned = false
 let petVideoFramePending = false
 let petVideoAlphaSamplesLogged = false
+let petVideoRenderPaused = false
 let activePetVideoUrl = ''
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
@@ -437,6 +439,7 @@ Component({
     },
     detached() {
       this.stopAlphaVideo()
+      this.releasePetVideoCanvas()
     },
   },
 
@@ -525,6 +528,14 @@ Component({
     },
 
     initPetVideoCanvas() {
+      if (petVideoCanvas && petVideoGl && petVideoProgram) {
+        this.startPetRenderer()
+        return
+      }
+
+      if (petVideoCanvasInitializing) return
+
+      petVideoCanvasInitializing = true
       wx.nextTick(() => {
         const query = wx.createSelectorQuery().in(this)
 
@@ -532,6 +543,8 @@ Component({
           .select('#petVideoCanvas')
           .fields({ node: true, size: true, rect: true })
           .exec((result) => {
+            petVideoCanvasInitializing = false
+
             const target = result && result[0]
             const canvas = target && target.node as PetVideoCanvasNode | undefined
 
@@ -582,7 +595,18 @@ Component({
     },
 
     startPetRenderer() {
+      if (!petVideoCanvas || !petVideoGl || !petVideoProgram) {
+        this.initPetVideoCanvas()
+        return
+      }
+
+      if (this.data.pageName !== 'home') {
+        petVideoRenderPaused = true
+        return
+      }
+
       if (petVideoGl && petVideoProgram && activePetVideoUrl) {
+        petVideoRenderPaused = false
         this.startAlphaVideo(activePetVideoUrl)
       }
     },
@@ -672,6 +696,7 @@ Component({
     },
 
     stopAlphaVideo() {
+      petVideoRenderPaused = false
       petVideoStartingUrl = ''
       petVideoActiveUrl = ''
       petVideoFirstFrameLogged = false
@@ -698,6 +723,55 @@ Component({
         }
         petVideoDecoder = null
       }
+    },
+
+    releasePetVideoCanvas() {
+      petVideoCanvasInitializing = false
+      petVideoCanvas = null
+      petVideoGl = null
+      petVideoProgram = null
+      petVideoFrameData = null
+    },
+
+    pausePetRenderer() {
+      petVideoRenderPaused = true
+
+      if (petVideoFrameRequest && petVideoCanvas) {
+        petVideoCanvas.cancelAnimationFrame(petVideoFrameRequest)
+        petVideoFrameRequest = 0
+      }
+    },
+
+    resumePetRenderer() {
+      petVideoRenderPaused = false
+
+      if (!petVideoCanvas || !petVideoGl || !petVideoProgram) {
+        this.initPetVideoCanvas()
+        return
+      }
+
+      if (petVideoDecoder && petVideoActiveUrl === activePetVideoUrl) {
+        if (!petVideoFrameRequest) {
+          this.renderAlphaVideoFrame()
+        }
+        return
+      }
+
+      this.startPetRenderer()
+    },
+
+    enterHomePage(updateData: Record<string, unknown> = {}) {
+      this.setData({
+        ...updateData,
+        pageName: 'home',
+      }, () => {
+        this.resumePetRenderer()
+      })
+    },
+
+    leaveHomePage(pageName: PageName) {
+      this.pausePetRenderer()
+      this.setData({ pageName })
     },
 
     createVideoDecoder(): PetVideoDecoder | null {
@@ -738,6 +812,11 @@ Component({
 
     renderAlphaVideoFrame() {
       if (!petVideoCanvas || !petVideoGl || !petVideoProgram || !petVideoDecoder) return
+
+      if (petVideoRenderPaused) {
+        petVideoFrameRequest = 0
+        return
+      }
 
       if (!petVideoFramePending) {
         const frameResult = petVideoDecoder.getFrameData()
@@ -1036,11 +1115,11 @@ Component({
     },
 
     openSettings() {
-      this.setData({ pageName: 'settings' })
+      this.leaveHomePage('settings')
     },
 
     backHome() {
-      this.setData({ pageName: 'home' })
+      this.enterHomePage()
     },
 
     backSettings() {
@@ -1064,12 +1143,10 @@ Component({
     selectPet() {
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
-      this.setData({
+      this.enterHomePage({
         petName: selected.name,
         settingsThumb: (selected && selected.thumbUrl) || '',
-        pageName: 'home',
       })
-      this.startPetRenderer()
     },
 
     selectRoom() {
@@ -1079,10 +1156,9 @@ Component({
 
       activeRoomId = selected.id
 
-      this.setData({
+      this.enterHomePage({
         backgroundMediaKind: selected.kind,
         backgroundMediaUrl: selected.resolvedMediaUrl || selected.mediaUrl,
-        pageName: 'home',
       })
     },
 

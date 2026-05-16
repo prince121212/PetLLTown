@@ -1,5 +1,5 @@
 <view class="app">
-  <view wx:if="{{pageName === 'home'}}" class="page home-page">
+  <view class="page home-page {{pageName === 'home' ? '' : 'home-page-paused'}}">
     <video
       wx:if="{{backgroundMediaKind === 'video'}}"
       class="home-wallpaper"
@@ -60,7 +60,7 @@
     </view>
   </view>
 
-  <view wx:elif="{{pageName === 'settings'}}" class="page settings-page">
+  <view wx:if="{{pageName === 'settings'}}" class="page settings-page">
     <view class="safe" style="{{pageShellStyle}}">
       <view class="top centered">
         <view class="back-btn" aria-label="返回首页" bindtap="backHome">
@@ -105,7 +105,7 @@
     </view>
   </view>
 
-  <view wx:elif="{{pageName === 'petPicker'}}" class="page picker-page">
+  <view wx:if="{{pageName === 'petPicker'}}" class="page picker-page">
     <view class="picker-safe" style="{{pageShellStyle}}">
       <view class="picker-head">
         <view class="back-btn" aria-label="返回设置" bindtap="backSettings">
@@ -146,7 +146,7 @@
     </view>
   </view>
 
-  <view wx:elif="{{pageName === 'roomPicker'}}" class="page picker-page">
+  <view wx:if="{{pageName === 'roomPicker'}}" class="page picker-page">
     <view class="picker-safe" style="{{pageShellStyle}}">
       <view class="picker-head">
         <view class="back-btn" aria-label="返回设置" bindtap="backSettings">
