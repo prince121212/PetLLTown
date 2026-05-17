@@ -39,7 +39,15 @@ const seedDocuments = [
     },
   })),
 ]
-const seedCollections = ['app_configs', 'pets', 'voice_logs', 'ai_logs']
+const seedCollections = [
+  'app_configs',
+  'pets',
+  'voice_logs',
+  'ai_logs',
+  'admin_config_drafts',
+  'admin_config_versions',
+  'admin_audit_logs',
+]
 
 const manager = CloudBaseManager.init({
   envId,

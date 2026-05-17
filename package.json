@@ -14,7 +14,11 @@
     "deploy:voice": "node scripts/deploy-voice-function.js",
     "deploy:asr-realtime": "node scripts/deploy-asr-realtime-function.js",
     "deploy:ai": "node scripts/deploy-ai-function.js",
-    "upload:media": "node scripts/upload-media-assets.js"
+    "deploy:admin-config": "node scripts/deploy-admin-config-function.js",
+    "upload:media": "node scripts/upload-media-assets.js",
+    "admin:dev": "npm --prefix admin run dev",
+    "admin:build": "npm --prefix admin run build",
+    "admin:typecheck": "npm --prefix admin run typecheck"
   },
   "keywords": [],
   "author": "",
