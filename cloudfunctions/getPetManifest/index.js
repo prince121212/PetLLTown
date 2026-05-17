@@ -1,5 +1,6 @@
 const cloud = require('wx-server-sdk')
 const danjuanManifest = require('./manifests/danjuan.manifest.json')
+const maoliziManifest = require('./manifests/maolizi.manifest.json')
 const xiaotuanziManifest = require('./manifests/xiaotuanzi.manifest.json')
 
 cloud.init({
@@ -11,6 +12,7 @@ const PETS_COLLECTION = 'pets'
 const DEFAULT_PET_ID = 'xiaotuanzi'
 const bundledManifests = {
   danjuan: danjuanManifest,
+  maolizi: maoliziManifest,
   xiaotuanzi: xiaotuanziManifest,
 }
 

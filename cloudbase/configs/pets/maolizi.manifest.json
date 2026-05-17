@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "2026-05-18-maolizi-001",
+  "petId": "maolizi",
+  "name": "毛栗子",
+  "defaultState": "idle",
+  "canvas": {
+    "width": 720,
+    "height": 960,
+    "anchorX": 0.5,
+    "anchorY": 0.94,
+    "safeArea": {
+      "x": 36,
+      "y": 48,
+      "width": 648,
+      "height": 864
+    }
+  },
+  "assets": {
+    "baseUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/maolizi/actions/idle/frames/",
+    "audioBaseUrl": ""
+  },
+  "actions": [
+    {
+      "id": "idle",
+      "type": "loop",
+      "label": "待机",
+      "fps": 24,
+      "frameCount": 146,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 1,
+      "endIndex": 146,
+      "connectAt": [1, 30, 60, 90, 120, 146],
+      "next": ["idle", "listen"]
+    },
+    {
+      "id": "listen",
+      "type": "loop",
+      "label": "倾听",
+      "fps": 24,
+      "frameCount": 40,
+      "framePattern": "frame_{index:0000}.png",
+      "startIndex": 30,
+      "endIndex": 69,
+      "connectAt": [30, 50, 69],
+      "next": ["idle"]
+    }
+  ],
+  "sounds": [],
+  "personality": {
+    "tone": "warm",
+    "replyStyle": "短句、热情、像一只圆脸亲人的小狗",
+    "traits": ["亲人", "热情", "会认真看着你"]
+  }
+}
