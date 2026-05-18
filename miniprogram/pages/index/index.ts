@@ -12,6 +12,7 @@ type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinki
 
 interface PageData {
   pageName: PageName
+  configReady: boolean
   appName: string
   petName: string
   homeHint: string
@@ -353,7 +354,7 @@ function buildPageData(config = bootstrapConfig): Partial<PageData> {
     pickerPets: buildPickerPets(pets),
     rooms,
     pickerRooms: buildPickerRooms(rooms),
-    settings: config.settings.items,
+    settings: config.settings.items.filter((item) => item.visible !== false),
     miniAd: config.settings.miniAd,
     activePetIndex: Math.max(
       0,
@@ -407,6 +408,7 @@ function voiceErrorMessage(message: string): string {
 Component({
   data: {
     pageName: 'home',
+    configReady: false,
     appName: FALLBACK_BOOTSTRAP_CONFIG.appName,
     petName: FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
     homeHint: FALLBACK_BOOTSTRAP_CONFIG.homeHint,
@@ -436,7 +438,6 @@ Component({
     attached() {
       this.syncSystemLayout()
       this.initRecorder()
-      this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
       this.fetchBootstrapConfig()
       this.initPetVideoCanvas()
     },
@@ -598,6 +599,8 @@ Component({
     },
 
     startPetRenderer() {
+      if (!this.data.configReady) return
+
       if (!petVideoCanvas || !petVideoGl || !petVideoProgram) {
         this.initPetVideoCanvas()
         return
@@ -1051,13 +1054,16 @@ Component({
 
     applyBootstrapConfig(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
       bootstrapConfig = config
-      this.setData(buildPageData(config))
+      this.setData({ ...buildPageData(config), configReady: true })
       this.resolveHomeMedia(config)
       this.startPetRenderer()
     },
 
     async fetchBootstrapConfig() {
-      if (!wx.cloud) return
+      if (!wx.cloud) {
+        this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
+        return
+      }
 
       try {
         const response = await wx.cloud.callFunction({
@@ -1068,12 +1074,14 @@ Component({
         })
 
         if (!isBootstrapFunctionResult(response.result) || response.result.ok === false) {
+          this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
           return
         }
 
         this.applyBootstrapConfig(normalizeBootstrapConfig(response.result.data))
       } catch (error) {
         console.warn('[index] bootstrap fallback:', error)
+        this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
       }
     },
 

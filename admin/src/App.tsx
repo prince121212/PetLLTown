@@ -664,6 +664,26 @@ function HomeView({
         />
         展示会员小卡片
       </label>
+      <fieldset className="visibility-fieldset">
+        <legend>设置项可见性</legend>
+        {draft.settings.items
+          .filter((item) => ['sound', 'voice', 'privacy'].includes(item.id))
+          .map((item) => (
+            <label key={item.id} className="check-field">
+              <input
+                checked={item.visible !== false}
+                onChange={(event) => {
+                  const items = draft.settings.items.map((si) =>
+                    si.id === item.id ? { ...si, visible: event.target.checked } : si,
+                  )
+                  setDraft({ ...draft, settings: { ...draft.settings, items } })
+                }}
+                type="checkbox"
+              />
+              展示「{item.title}」
+            </label>
+          ))}
+      </fieldset>
       <button className="primary-button form-submit" disabled={saving} type="submit">
         {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
         保存到草稿

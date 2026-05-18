@@ -450,6 +450,22 @@ th {
   width: fit-content;
 }
 
+.visibility-fieldset {
+  border: 1px solid #cfdad2;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.visibility-fieldset legend {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4c5a51;
+  padding: 0 4px;
+}
+
 .drawer {
   align-items: flex-start;
   background: rgba(9, 18, 13, 0.42);

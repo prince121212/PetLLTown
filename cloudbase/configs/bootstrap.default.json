@@ -45,7 +45,8 @@
         "title": "声音反馈",
         "subtitle": "叫声、呼吸、扑扇、玩具音",
         "kind": "switch",
-        "enabled": true
+        "enabled": true,
+        "visible": true
       },
       {
         "id": "voice",
@@ -53,14 +54,16 @@
         "title": "语音监听",
         "subtitle": "只在前台打开时工作",
         "kind": "switch",
-        "enabled": true
+        "enabled": true,
+        "visible": true
       },
       {
         "id": "privacy",
         "icon": "◎",
         "title": "隐私与权限",
         "subtitle": "麦克风、通知、数据说明",
-        "kind": "link"
+        "kind": "link",
+        "visible": true
       }
     ],
     "miniAd": {

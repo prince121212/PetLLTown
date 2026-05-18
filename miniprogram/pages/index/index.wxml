@@ -25,6 +25,9 @@
       <button class="tiny-btn settings-entry" style="{{homeTopStyle}}" aria-label="打开设置" bindtap="openSettings">⚙</button>
 
       <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
+        <view wx:if="{{!configReady}}" class="pet-loading">
+          <view class="pet-loading-spinner"></view>
+        </view>
         <canvas id="petVideoCanvas" type="webgl" class="pet-canvas"></canvas>
       </view>
 

@@ -31,6 +31,7 @@ export interface SettingItem {
   kind: 'link' | 'switch'
   target?: PageName
   enabled?: boolean
+  visible?: boolean
 }
 
 export interface BootstrapConfig {
