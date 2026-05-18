@@ -73,11 +73,11 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
   configVersion: 'local-fallback-2026-05-15',
   appName: '宠物小小镇',
   defaultPetId: 'xiaotuanzi',
-  defaultRoomId: 'early-summer-breeze',
+  defaultRoomId: 'pure-black',
   defaultPetName: '小团子',
   homeHint: '它在听你说话',
   homeMedia: {
-    backgroundVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4',
+    backgroundVideoUrl: '',
     petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
     listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
   },
@@ -130,6 +130,14 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
     },
   },
   rooms: [
+    {
+      id: 'pure-black',
+      name: '纯黑',
+      subtitle: '默认背景',
+      kind: 'image',
+      mediaUrl: '',
+      enabled: true,
+    },
     {
       id: 'saturn-journey',
       name: '土星奇旅',

@@ -1,7 +1,7 @@
 <view class="app">
   <view class="page home-page {{pageName === 'home' ? '' : 'home-page-paused'}}">
     <video
-      wx:if="{{backgroundMediaKind === 'video'}}"
+      wx:if="{{backgroundMediaKind === 'video' && backgroundMediaUrl}}"
       class="home-wallpaper"
       src="{{backgroundMediaUrl}}"
       autoplay="{{true}}"
@@ -14,7 +14,7 @@
       enable-progress-gesture="{{false}}"
       object-fit="cover"
     ></video>
-    <image wx:else class="home-wallpaper" src="{{backgroundMediaUrl}}" mode="aspectFill" show-menu-by-longpress="{{false}}" />
+    <image wx:elif="{{backgroundMediaKind === 'image' && backgroundMediaUrl}}" class="home-wallpaper" src="{{backgroundMediaUrl}}" mode="aspectFill" show-menu-by-longpress="{{false}}" />
     <view class="safe" style="{{pageShellStyle}}">
       <view class="top" style="{{homeTopStyle}}">
         <view class="pet-title">
@@ -41,7 +41,6 @@
           <video
             class="listen-video"
             src="{{listenOrbVideoUrl}}"
-            poster="{{listenFrame}}"
             autoplay="{{true}}"
             loop="{{true}}"
             muted="{{true}}"

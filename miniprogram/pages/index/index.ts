@@ -413,8 +413,8 @@ Component({
     pageShellStyle: '',
     homeTopStyle: '',
     homeStageStyle: '',
-    backgroundMediaKind: FALLBACK_BOOTSTRAP_CONFIG.rooms[1] && FALLBACK_BOOTSTRAP_CONFIG.rooms[1].kind ? FALLBACK_BOOTSTRAP_CONFIG.rooms[1].kind : 'video',
-    backgroundMediaUrl: FALLBACK_BOOTSTRAP_CONFIG.rooms[1] && FALLBACK_BOOTSTRAP_CONFIG.rooms[1].mediaUrl ? FALLBACK_BOOTSTRAP_CONFIG.rooms[1].mediaUrl : FALLBACK_BOOTSTRAP_CONFIG.homeMedia.backgroundVideoUrl,
+    backgroundMediaKind: (FALLBACK_BOOTSTRAP_CONFIG.rooms.find((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId) || FALLBACK_BOOTSTRAP_CONFIG.rooms[0] || { kind: 'image' }).kind || 'image',
+    backgroundMediaUrl: (FALLBACK_BOOTSTRAP_CONFIG.rooms.find((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId) || FALLBACK_BOOTSTRAP_CONFIG.rooms[0] || { mediaUrl: '' }).mediaUrl || '',
     listenOrbVideoUrl: FALLBACK_BOOTSTRAP_CONFIG.homeMedia.listenOrbVideoUrl,
     listenFrame: FALLBACK_BOOTSTRAP_CONFIG.pets[0] && FALLBACK_BOOTSTRAP_CONFIG.pets[0].listenFrameUrl ? FALLBACK_BOOTSTRAP_CONFIG.pets[0].listenFrameUrl : '',
     settingsThumb: FALLBACK_BOOTSTRAP_CONFIG.pets[0] && FALLBACK_BOOTSTRAP_CONFIG.pets[0].thumbUrl ? FALLBACK_BOOTSTRAP_CONFIG.pets[0].thumbUrl : '',
@@ -429,7 +429,7 @@ Component({
     transcribedText: '',
     petReply: '',
     activePetIndex: 0,
-    activeRoomIndex: 1,
+    activeRoomIndex: Math.max(0, FALLBACK_BOOTSTRAP_CONFIG.rooms.findIndex((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId)),
   } as PageData,
 
   lifetimes: {
