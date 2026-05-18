@@ -7,6 +7,7 @@ const { loadLocalEnv } = require('./lib/load-env')
 const root = path.resolve(__dirname, '..')
 const args = new Set(process.argv.slice(2))
 const shouldApply = args.has('--apply')
+const shouldOverwriteBootstrap = args.has('--overwrite-bootstrap') || args.has('--force-bootstrap')
 
 loadLocalEnv(root)
 
@@ -44,8 +45,6 @@ const seedCollections = [
   'pets',
   'voice_logs',
   'ai_logs',
-  'admin_config_drafts',
-  'admin_config_versions',
   'admin_audit_logs',
 ]
 
@@ -103,6 +102,18 @@ async function writeDocument(document) {
   console.log(`seeded ${document.collection}/${document.id}`)
 }
 
+async function documentExists(collection, id) {
+  const db = app.database()
+
+  try {
+    const result = await db.collection(collection).doc(id).get()
+    const data = Array.isArray(result.data) ? result.data[0] : result.data
+    return Boolean(data)
+  } catch (error) {
+    return false
+  }
+}
+
 async function main() {
   console.log(`${shouldApply ? 'seeding' : 'dry run'} CloudBase data for ${envId}`)
 
@@ -116,6 +127,7 @@ async function main() {
 
   if (!shouldApply) {
     console.log('add --apply to create collections and write documents')
+    console.log('existing app_configs/bootstrap is protected; add --overwrite-bootstrap only when intentionally replacing the online admin config')
     return
   }
 
@@ -124,6 +136,16 @@ async function main() {
   }
 
   for (const document of seedDocuments) {
+    if (document.collection === 'app_configs' && document.id === 'bootstrap' && !shouldOverwriteBootstrap) {
+      const exists = await documentExists(document.collection, document.id)
+
+      if (exists) {
+        console.log('skipped app_configs/bootstrap because it already exists')
+        console.log('add --overwrite-bootstrap to intentionally replace the online bootstrap config')
+        continue
+      }
+    }
+
     await writeDocument(document)
   }
 

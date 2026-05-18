@@ -58,18 +58,22 @@ export interface BootstrapConfig {
 }
 
 export interface AdminConfigState {
-  published: BootstrapConfig
-  draft: BootstrapConfig
-  hasDraft: boolean
-  versions: AdminConfigVersion[]
+  config: BootstrapConfig
+  auditLogs: AdminAuditLog[]
+  meta?: {
+    envId?: string
+    serverTime?: string
+  }
 }
 
-export interface AdminConfigVersion {
+export interface AdminAuditLog {
   id: string
-  version: string
+  action: string
+  target: string
   summary: string
-  publishedAt: string
-  publishedBy: string
+  actor: string
+  source: string
+  createdAt: string
 }
 
 export interface ValidationIssue {
@@ -107,5 +111,25 @@ export interface MediaCreateResult {
     thumbUrl: string
     listenFrameUrl: string
     frameCount: number
+  }
+}
+
+export interface RoomMediaCreateResult {
+  room: RoomOption
+  upload: {
+    mediaUrl: string
+    thumbUrl: string
+    key: string
+    contentType: string
+    size: number
+  }
+  inspect: {
+    kind: RoomOption['kind']
+    fileName: string
+    width?: number
+    height?: number
+    duration?: number
+    codec?: string
+    warnings: string[]
   }
 }
