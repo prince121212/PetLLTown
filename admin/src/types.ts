@@ -9,6 +9,7 @@ export interface PetOption {
   videoUrl?: string
   thumbUrl?: string
   listenFrameUrl?: string
+  audioUrl?: string
   enabled?: boolean
 }
 
@@ -57,13 +58,17 @@ export interface BootstrapConfig {
   pets: PetOption[]
 }
 
-export interface AdminConfigState {
-  config: BootstrapConfig
-  auditLogs: AdminAuditLog[]
-  meta?: {
-    envId?: string
-    serverTime?: string
-  }
+export interface ValidationIssue {
+  field: string
+  message: string
+}
+
+export interface VersionRecord {
+  version: string
+  summary: string
+  rollbackOf: string
+  publishedAt: string
+  publishedBy: string
 }
 
 export interface AdminAuditLog {
@@ -76,9 +81,18 @@ export interface AdminAuditLog {
   createdAt: string
 }
 
-export interface ValidationIssue {
-  field: string
-  message: string
+export interface AdminState {
+  published: BootstrapConfig
+  draft: BootstrapConfig | null
+  hasDraft: boolean
+  hasDraftChanges: boolean
+  draftIssues: ValidationIssue[]
+  versions: VersionRecord[]
+  auditLogs: AdminAuditLog[]
+  meta?: {
+    envId?: string
+    serverTime?: string
+  }
 }
 
 export interface MediaInspectResult {
@@ -112,6 +126,8 @@ export interface MediaCreateResult {
     listenFrameUrl: string
     frameCount: number
   }
+  draftIssues: ValidationIssue[]
+  state: AdminState
 }
 
 export interface RoomMediaCreateResult {
@@ -132,4 +148,6 @@ export interface RoomMediaCreateResult {
     codec?: string
     warnings: string[]
   }
+  draftIssues: ValidationIssue[]
+  state: AdminState
 }

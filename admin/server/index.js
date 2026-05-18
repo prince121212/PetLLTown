@@ -27,9 +27,11 @@ const region = process.env.CLOUDBASE_REGION || process.env.COS_REGION || process
 const cosBucket = requiredEnv('COS_BUCKET', 'TCB_STORAGE_BUCKET')
 const cosRegion = process.env.COS_REGION || process.env.TENCENTCLOUD_REGION || region
 const CONFIG_COLLECTION = 'app_configs'
+const DRAFT_COLLECTION = 'admin_config_drafts'
+const VERSION_COLLECTION = 'admin_config_versions'
 const AUDIT_COLLECTION = 'admin_audit_logs'
 const CONFIG_DOC_ID = 'bootstrap'
-const REQUIRED_COLLECTIONS = [CONFIG_COLLECTION, AUDIT_COLLECTION, 'pets']
+const REQUIRED_COLLECTIONS = [CONFIG_COLLECTION, DRAFT_COLLECTION, VERSION_COLLECTION, AUDIT_COLLECTION, 'pets']
 const app = cloudbase.init({ env: envId, secretId, secretKey, region })
 const manager = CloudBaseManager.init({ envId, secretId, secretKey, region })
 const cos = new COS({ SecretId: secretId, SecretKey: secretKey })
@@ -44,14 +46,14 @@ server.get('/api/health', (_request, response) => {
   response.json({ ok: true, data: { envId, serverTime: new Date().toISOString() } })
 })
 
-server.get('/api/config/state', async (_request, response) => {
-  await handle(response, async () => getConfigState())
+server.get('/api/state', async (_request, response) => {
+  await handle(response, async () => getAdminState())
 })
 
-server.put('/api/config', async (request, response) => {
+server.put('/api/draft', async (request, response) => {
   await handle(response, async () => {
-    const config = prepareConfigForSave(normalizeConfig(request.body && request.body.config))
-    const issues = validateConfig(config)
+    const config = normalizeForPersist(normalizeConfig(request.body && request.body.config))
+    const issues = validateConfig(config, { strict: false })
 
     if (issues.length) {
       const error = new Error(issues.map((issue) => issue.message).join('；'))
@@ -59,14 +61,133 @@ server.put('/api/config', async (request, response) => {
       throw error
     }
 
-    await writePublishedConfig(config)
+    await writeDraftConfig(config)
     await writeAuditLog({
-      action: 'saveConfig',
+      action: 'saveDraft',
       target: CONFIG_DOC_ID,
-      summary: summarizeConfig(config),
+      summary: `保存草稿：${summarizeConfig(config)}`,
       source: request.ip || 'admin-server',
     })
-    return getConfigState()
+    return getAdminState()
+  })
+})
+
+server.delete('/api/draft', async (request, response) => {
+  await handle(response, async () => {
+    await deleteDraftConfig()
+    await writeAuditLog({
+      action: 'discardDraft',
+      target: CONFIG_DOC_ID,
+      summary: '丢弃草稿，恢复到当前线上',
+      source: request.ip || 'admin-server',
+    })
+    return getAdminState()
+  })
+})
+
+server.post('/api/publish', async (request, response) => {
+  await handle(response, async () => {
+    const summary = String(request.body && request.body.summary ? request.body.summary : '').trim()
+    const draft = await readDraftConfig()
+
+    if (!draft) {
+      const error = new Error('当前没有可发布的草稿')
+      error.statusCode = 400
+      throw error
+    }
+
+    const issues = validateConfig(draft, { strict: true })
+
+    if (issues.length) {
+      const error = new Error(issues.map((issue) => issue.message).join('；'))
+      error.statusCode = 400
+      throw error
+    }
+
+    const version = buildVersionId()
+    const finalConfig = stampConfigVersion(normalizeForPersist(draft), version)
+
+    await writePublishedConfig(finalConfig)
+    await writeVersionRecord({ version, config: finalConfig, summary })
+    await deleteDraftConfig()
+    await writeAuditLog({
+      action: 'publishConfig',
+      target: version,
+      summary: summary || `发布配置 ${version}`,
+      source: request.ip || 'admin-server',
+    })
+
+    return getAdminState()
+  })
+})
+
+server.post('/api/rollback', async (request, response) => {
+  await handle(response, async () => {
+    const versionId = String(request.body && request.body.versionId ? request.body.versionId : '').trim()
+
+    if (!versionId) {
+      const error = new Error('缺少 versionId')
+      error.statusCode = 400
+      throw error
+    }
+
+    const record = await getDocument(VERSION_COLLECTION, versionId)
+
+    if (!record || !record.config) {
+      const error = new Error(`版本 ${versionId} 不存在`)
+      error.statusCode = 404
+      throw error
+    }
+
+    const newVersion = buildVersionId()
+    const finalConfig = stampConfigVersion(record.config, newVersion)
+
+    await writePublishedConfig(finalConfig)
+    await writeVersionRecord({
+      version: newVersion,
+      config: finalConfig,
+      summary: `回滚到 ${versionId}`,
+      rollbackOf: versionId,
+    })
+    await deleteDraftConfig()
+    await writeAuditLog({
+      action: 'rollbackConfig',
+      target: newVersion,
+      summary: `回滚到 ${versionId}`,
+      source: request.ip || 'admin-server',
+    })
+
+    return getAdminState()
+  })
+})
+
+server.post('/api/resolve-url', async (request, response) => {
+  await handle(response, async () => {
+    const fileID = String(request.body && request.body.fileID ? request.body.fileID : '').trim()
+
+    if (!fileID || !fileID.startsWith('cloud://')) {
+      const error = new Error('请提供 cloud:// 开头的文件 ID')
+      error.statusCode = 400
+      throw error
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      cos.getObjectUrl(
+        {
+          Bucket: cosBucket,
+          Region: cosRegion,
+          Key: fileID.replace(/^cloud:\/\/[^/]+\//, ''),
+          Sign: true,
+          Expires: 7200,
+        },
+        (error, data) => {
+          if (error) reject(error)
+          else resolve(data)
+        },
+      )
+    })
+
+    return { url: result.Url }
   })
 })
 
@@ -212,13 +333,27 @@ server.post('/api/media/pets/create-from-webm', upload.single('source'), async (
         name,
         subtitle,
       })
+
+      const draftConfig = await getDraftBase()
+      const nextDraft = upsertPetIntoConfig(draftConfig, result.pet)
+      const draftIssues = validateConfig(nextDraft, { strict: false })
+
+      if (!draftIssues.length) {
+        await writeDraftConfig(nextDraft)
+      }
+
       await writeAuditLog({
         action: 'createPetFromWebm',
         target: petId,
-        summary: `处理并上传 ${name} 的 idle WebM`,
+        summary: `处理并写入草稿：${name} 的 idle WebM`,
         source: request.ip || 'admin-server',
       })
-      return result
+
+      return {
+        ...result,
+        draftIssues,
+        state: await getAdminState(),
+      }
     } finally {
       await fsp.rm(sourceFile.path, { force: true }).catch(() => undefined)
     }
@@ -256,14 +391,26 @@ server.post('/api/media/rooms/create-from-media', upload.single('source'), async
         subtitle,
       })
 
+      const draftConfig = await getDraftBase()
+      const nextDraft = upsertRoomIntoConfig(draftConfig, result.room)
+      const draftIssues = validateConfig(nextDraft, { strict: false })
+
+      if (!draftIssues.length) {
+        await writeDraftConfig(nextDraft)
+      }
+
       await writeAuditLog({
         action: 'createRoomFromMedia',
         target: result.room.id,
-        summary: `上传背景素材 ${name}`,
+        summary: `上传背景素材并写入草稿：${name}`,
         source: request.ip || 'admin-server',
       })
 
-      return result
+      return {
+        ...result,
+        draftIssues,
+        state: await getAdminState(),
+      }
     } finally {
       await fsp.rm(sourceFile.path, { force: true }).catch(() => undefined)
     }
@@ -275,12 +422,20 @@ server.listen(port, () => {
   console.log(`admin server listening on http://127.0.0.1:${port}`)
 })
 
-async function getConfigState() {
-  const config = await readPublishedConfig()
+async function getAdminState() {
+  const published = await readPublishedConfig()
+  const draft = await readDraftConfig()
+  const versions = await listVersions()
   const auditLogs = await listAuditLogs()
+  const draftIssues = draft ? validateConfig(draft, { strict: false }) : []
 
   return {
-    config,
+    published,
+    draft,
+    hasDraft: Boolean(draft),
+    hasDraftChanges: draft ? hasConfigChanges(published, draft) : false,
+    draftIssues,
+    versions,
     auditLogs,
     meta: {
       envId,
@@ -333,18 +488,26 @@ async function createPetFromWebm({ sourcePath, originalName, petId, name, subtit
     await extractFrame(sourcePath, listenFrameIndex, listenFrame)
     await extractFrame(sourcePath, thumbFrameIndex, thumbFrame)
 
+    const audioFile = path.join(workDir, `${petId}-idle.aac`)
+    const hasAudio = await extractAudio(sourcePath, audioFile)
+
     const videoKey = `pets/${petId}/actions/idle/videos/${petId}-idle-alpha-pack-h.mp4`
     const listenKey = `pets/${petId}/actions/idle/frames/frame_0030.png`
     const thumbKey = `pets/${petId}/actions/idle/frames/frame_0090.png`
+    const audioKey = hasAudio ? `pets/${petId}/actions/idle/audio/${petId}-idle.aac` : ''
 
     await uploadToCos(outputVideo, videoKey, 'video/mp4')
     await uploadToCos(listenFrame, listenKey, 'image/png')
     await uploadToCos(thumbFrame, thumbKey, 'image/png')
+    if (hasAudio) {
+      await uploadToCos(audioFile, audioKey, 'audio/aac')
+    }
 
     const videoUrl = cloudUrl(videoKey)
     const listenFrameUrl = cloudUrl(listenKey)
     const thumbUrl = cloudUrl(thumbKey)
-    const manifest = buildPetManifest({ petId, name, frameCount: frameCount || Math.round(inspect.source.duration * 24) })
+    const audioUrl = hasAudio ? cloudUrl(audioKey) : ''
+    const manifest = buildPetManifest({ petId, name, frameCount: frameCount || Math.round(inspect.source.duration * 24), audioUrl })
     const pet = {
       id: petId,
       name,
@@ -354,6 +517,7 @@ async function createPetFromWebm({ sourcePath, originalName, petId, name, subtit
       videoUrl,
       thumbUrl,
       listenFrameUrl,
+      audioUrl,
       enabled: true,
     }
 
@@ -471,7 +635,7 @@ async function inspectWebm({ sourcePath, originalName, probe, alphaCheck }) {
   if (!hasAlphaMode) warnings.push('源素材缺少 ALPHA_MODE=1')
   if (width !== 720 || height !== 960) warnings.push(`源尺寸为 ${width}x${height}，会规范化为 720x960`)
   if (Math.round(fps) !== 24) warnings.push(`源帧率为 ${fps || 0}fps，会规范化为 24fps`)
-  if (audio) warnings.push('源素材包含音频，运行时素材会去除音频')
+  if (audio) warnings.push('源素材包含音频，将单独抽取为 AAC 文件')
 
   let alpha = { yMin: 255, yMax: 0 }
 
@@ -532,6 +696,26 @@ async function transcodeAlphaPack(sourcePath, outputVideo) {
   ])
 }
 
+async function extractAudio(sourcePath, outputAudio) {
+  try {
+    await execFfmpeg([
+      '-y',
+      '-i',
+      sourcePath,
+      '-vn',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      outputAudio,
+    ])
+    const stats = await fsp.stat(outputAudio).catch(() => null)
+    return stats && stats.size > 0
+  } catch (error) {
+    return false
+  }
+}
+
 async function inspectPackedAlpha(outputVideo, targetPath) {
   await execFfmpeg(['-y', '-i', outputVideo, '-frames:v', '1', '-vf', 'crop=720:960:720:0,format=gray', targetPath])
   return signalStats(targetPath)
@@ -552,7 +736,7 @@ async function extractFrame(sourcePath, index, targetPath) {
   ])
 }
 
-function buildPetManifest({ petId, name, frameCount }) {
+function buildPetManifest({ petId, name, frameCount, audioUrl }) {
   const safeFrameCount = Math.max(1, Number(frameCount || 1))
 
   return {
@@ -575,7 +759,7 @@ function buildPetManifest({ petId, name, frameCount }) {
     },
     assets: {
       baseUrl: `${cloudUrl(`pets/${petId}/actions/idle/frames`)}/`,
-      audioBaseUrl: '',
+      audioBaseUrl: audioUrl ? `${cloudUrl(`pets/${petId}/actions/idle/audio`)}/` : '',
     },
     actions: [
       {
@@ -589,6 +773,7 @@ function buildPetManifest({ petId, name, frameCount }) {
         endIndex: safeFrameCount,
         connectAt: [1, Math.min(30, safeFrameCount), Math.min(60, safeFrameCount), safeFrameCount],
         next: ['idle', 'listen'],
+        audioUrl: audioUrl || '',
       },
       {
         id: 'listen',
@@ -603,7 +788,7 @@ function buildPetManifest({ petId, name, frameCount }) {
         next: ['idle'],
       },
     ],
-    sounds: [],
+    sounds: audioUrl ? [{ id: 'idle-loop', url: audioUrl, loop: true }] : [],
     personality: {
       tone: 'warm',
       replyStyle: '短句、亲近、像一只认真陪伴你的小宠物',
@@ -621,6 +806,150 @@ async function readPublishedConfig() {
   }
 
   return normalizeConfig(record.config || record)
+}
+
+async function readDraftConfig() {
+  const record = await getDocument(DRAFT_COLLECTION, CONFIG_DOC_ID).catch(() => null)
+
+  if (!record || !record.config) return null
+  return normalizeConfig(record.config)
+}
+
+async function writeDraftConfig(config) {
+  await setDocument(DRAFT_COLLECTION, CONFIG_DOC_ID, {
+    enabled: true,
+    config,
+    status: 'draft',
+    updatedAt: new Date().toISOString(),
+    updatedBy: process.env.ADMIN_ACTOR || 'admin',
+  })
+}
+
+async function deleteDraftConfig() {
+  const db = app.database()
+  try {
+    await db.collection(DRAFT_COLLECTION).doc(CONFIG_DOC_ID).remove()
+  } catch (error) {
+    if (!isMissingDocumentError(error) && !isMissingCollectionError(error)) {
+      throw error
+    }
+  }
+}
+
+async function writeVersionRecord({ version, config, summary, rollbackOf }) {
+  await setDocument(VERSION_COLLECTION, version, {
+    version,
+    config,
+    summary: summary || '',
+    rollbackOf: rollbackOf || '',
+    publishedAt: new Date().toISOString(),
+    publishedBy: process.env.ADMIN_ACTOR || 'admin',
+  })
+}
+
+async function listVersions() {
+  const db = app.database()
+  const result = await db.collection(VERSION_COLLECTION).orderBy('publishedAt', 'desc').limit(20).get().catch(() => ({ data: [] }))
+  const records = Array.isArray(result.data) ? result.data : []
+
+  return records.map((record) => ({
+    version: record.version || record._id || '',
+    summary: record.summary || '',
+    rollbackOf: record.rollbackOf || '',
+    publishedAt: record.publishedAt || '',
+    publishedBy: record.publishedBy || '',
+  }))
+}
+
+function isMissingDocumentError(error) {
+  const message = error && error.message ? error.message : String(error)
+  return message.includes('DOCUMENT_NOT_FOUND') || message.includes('NotFound') || message.includes('not exist')
+}
+
+function hasConfigChanges(published, draft) {
+  if (!draft) return false
+  if (!published) return true
+
+  const cleanedPublished = stripVolatileFields(published)
+  const cleanedDraft = stripVolatileFields(draft)
+
+  return JSON.stringify(cleanedPublished) !== JSON.stringify(cleanedDraft)
+}
+
+async function getDraftBase() {
+  const draft = await readDraftConfig()
+  if (draft) return draft
+
+  const published = await readPublishedConfig()
+  return JSON.parse(JSON.stringify(published))
+}
+
+function upsertPetIntoConfig(config, pet) {
+  const next = JSON.parse(JSON.stringify(config))
+  const pets = Array.isArray(next.pets) ? next.pets : []
+  const index = pets.findIndex((item) => item.id === pet.id)
+
+  if (index === -1) {
+    pets.push(pet)
+  } else {
+    pets[index] = { ...pets[index], ...pet }
+  }
+
+  next.pets = pets
+
+  if (!next.defaultPetId || !pets.some((item) => item.id === next.defaultPetId && item.enabled !== false)) {
+    next.defaultPetId = pet.id
+    next.defaultPetName = pet.name
+    next.homeMedia = {
+      ...(next.homeMedia || {}),
+      petVideoUrl: pet.videoUrl || (next.homeMedia && next.homeMedia.petVideoUrl) || '',
+    }
+  }
+
+  return normalizeForPersist(next)
+}
+
+function upsertRoomIntoConfig(config, room) {
+  const next = JSON.parse(JSON.stringify(config))
+  const rooms = Array.isArray(next.rooms) ? next.rooms : []
+  const index = rooms.findIndex((item) => item.id === room.id)
+
+  if (index === -1) {
+    rooms.push(room)
+  } else {
+    rooms[index] = { ...rooms[index], ...room }
+  }
+
+  next.rooms = rooms
+
+  if (!next.defaultRoomId || !rooms.some((item) => item.id === next.defaultRoomId && item.enabled !== false)) {
+    next.defaultRoomId = room.id
+    next.homeMedia = {
+      ...(next.homeMedia || {}),
+      backgroundVideoUrl: room.mediaUrl || (next.homeMedia && next.homeMedia.backgroundVideoUrl) || '',
+    }
+  }
+
+  return normalizeForPersist(next)
+}
+
+function stripVolatileFields(config) {
+  if (!config || typeof config !== 'object') return config
+
+  const clone = JSON.parse(JSON.stringify(config))
+  delete clone.configVersion
+  delete clone.serverTime
+  return clone
+}
+
+function buildVersionId() {
+  return `v-${formatTimestamp(new Date())}`
+}
+
+function stampConfigVersion(config, version) {
+  const next = JSON.parse(JSON.stringify(config))
+  next.configVersion = version
+  return next
 }
 
 async function writePublishedConfig(config) {
@@ -721,15 +1050,13 @@ function normalizeConfig(value) {
   return value
 }
 
-function prepareConfigForSave(config) {
-  const now = new Date()
+function normalizeForPersist(config) {
   const homeHint = config.homeHint || (config.home && config.home.hint) || ''
   const pets = Array.isArray(config.pets) ? config.pets : []
   const defaultPet = pets.find((pet) => pet.id === config.defaultPetId)
 
   return {
     ...config,
-    configVersion: `admin-save-${formatTimestamp(now)}`,
     defaultPetName: defaultPet?.name || config.defaultPetName || '',
     homeHint,
     home: {
@@ -739,7 +1066,8 @@ function prepareConfigForSave(config) {
   }
 }
 
-function validateConfig(config) {
+function validateConfig(config, options = {}) {
+  const strict = options.strict !== false
   const issues = []
   const pets = Array.isArray(config.pets) ? config.pets : []
   const rooms = Array.isArray(config.rooms) ? config.rooms : []
@@ -748,11 +1076,19 @@ function validateConfig(config) {
   const petIds = new Set()
   const roomIds = new Set()
 
-  if (!enabledPets.some((pet) => pet.id === config.defaultPetId)) {
+  if (strict && !enabledPets.length) {
+    issues.push({ field: 'pets', message: '至少需要一个启用宠物' })
+  }
+
+  if (strict && !enabledRooms.length) {
+    issues.push({ field: 'rooms', message: '至少需要一个启用背景' })
+  }
+
+  if (strict && !enabledPets.some((pet) => pet.id === config.defaultPetId)) {
     issues.push({ field: 'defaultPetId', message: '默认宠物必须存在且启用' })
   }
 
-  if (!enabledRooms.some((room) => room.id === config.defaultRoomId)) {
+  if (strict && !enabledRooms.some((room) => room.id === config.defaultRoomId)) {
     issues.push({ field: 'defaultRoomId', message: '默认背景必须存在且启用' })
   }
 
@@ -771,7 +1107,7 @@ function validateConfig(config) {
 
     if (pet.enabled === false) continue
 
-    if (!pet.videoUrl || !pet.thumbUrl) {
+    if (strict && (!pet.videoUrl || !pet.thumbUrl)) {
       issues.push({ field: `pets.${pet.id}`, message: `${pet.name || pet.id} 缺少视频或预览图` })
     }
 
@@ -797,7 +1133,7 @@ function validateConfig(config) {
 
     if (room.enabled === false) continue
 
-    if (!room.mediaUrl) {
+    if (strict && !room.mediaUrl) {
       issues.push({ field: `rooms.${room.id}`, message: `${room.name || room.id} 缺少背景媒体` })
     }
 
@@ -865,7 +1201,22 @@ function execFfmpeg(args) {
 }
 
 function execJson(command, args) {
-  return execText(command, args).then((output) => JSON.parse(output))
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 20 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}\n${stderr}`
+        reject(error)
+        return
+      }
+
+      try {
+        resolve(JSON.parse(stdout))
+      } catch (parseError) {
+        parseError.message = `${parseError.message}\nstdout=${String(stdout).slice(0, 500)}\nstderr=${String(stderr).slice(0, 500)}`
+        reject(parseError)
+      }
+    })
+  })
 }
 
 function execText(command, args) {

@@ -249,6 +249,8 @@ let petVideoFramePending = false
 let petVideoAlphaSamplesLogged = false
 let petVideoRenderPaused = false
 let activePetVideoUrl = ''
+let activePetAudioUrl = ''
+let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
 let recorder: WechatMiniprogram.RecorderManager | null = null
@@ -335,6 +337,7 @@ function buildPageData(config = bootstrapConfig): Partial<PageData> {
   const activeRoom = rooms.find((room) => room.id === config.defaultRoomId) || rooms[0]
   const petName = activePet ? activePet.name : config.defaultPetName
   activePetVideoUrl = (activePet && activePet.videoUrl) || config.homeMedia.petVideoUrl
+  activePetAudioUrl = (activePet && activePet.audioUrl) || ''
   activeRoomId = activeRoom ? activeRoom.id : ''
 
   return {
@@ -608,6 +611,7 @@ Component({
       if (petVideoGl && petVideoProgram && activePetVideoUrl) {
         petVideoRenderPaused = false
         this.startAlphaVideo(activePetVideoUrl)
+        this.startPetAudio()
       }
     },
 
@@ -703,6 +707,7 @@ Component({
       petVideoFrameShapeWarned = false
       petVideoFramePending = false
       petVideoAlphaSamplesLogged = false
+      this.stopPetAudio()
 
       if (petVideoStartTimer) {
         clearTimeout(petVideoStartTimer)
@@ -735,6 +740,7 @@ Component({
 
     pausePetRenderer() {
       petVideoRenderPaused = true
+      this.pausePetAudio()
 
       if (petVideoFrameRequest && petVideoCanvas) {
         petVideoCanvas.cancelAnimationFrame(petVideoFrameRequest)
@@ -754,6 +760,7 @@ Component({
         if (!petVideoFrameRequest) {
           this.renderAlphaVideoFrame()
         }
+        this.resumePetAudio()
         return
       }
 
@@ -1143,6 +1150,7 @@ Component({
     selectPet() {
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
+      activePetAudioUrl = (selected && selected.audioUrl) || ''
       this.enterHomePage({
         petName: selected.name,
         settingsThumb: (selected && selected.thumbUrl) || '',
@@ -1540,6 +1548,83 @@ Component({
       }
 
       return '小团子刚刚走神了，再试一次'
+    },
+
+    startPetAudio() {
+      this.stopPetAudio()
+
+      if (!activePetAudioUrl) return
+
+      wx.setInnerAudioOption({
+        mixWithOther: true,
+        obeyMuteSwitch: false,
+      })
+
+      const ctx = (wx.createInnerAudioContext as (options?: Record<string, unknown>) => WechatMiniprogram.InnerAudioContext)({
+        useWebAudioImplement: true,
+      })
+      ctx.loop = true
+      ctx.volume = 1.0
+
+      if (activePetAudioUrl.startsWith('cloud://')) {
+        wx.cloud.downloadFile({
+          fileID: activePetAudioUrl,
+        }).then((result) => {
+          if (!petAudioContext || petAudioContext !== ctx) return
+          ctx.src = result.tempFilePath
+          ctx.play()
+          console.info('[index] pet audio playing:', { src: result.tempFilePath })
+        }).catch((error) => {
+          console.warn('[index] pet audio download failed:', error)
+        })
+      } else {
+        ctx.src = activePetAudioUrl
+        ctx.play()
+        console.info('[index] pet audio playing:', { src: activePetAudioUrl })
+      }
+
+      ctx.onPlay(() => {
+        console.info('[index] pet audio onPlay fired')
+      })
+
+      ctx.onError((error) => {
+        console.warn('[index] pet audio error:', error)
+      })
+
+      petAudioContext = ctx
+    },
+
+    stopPetAudio() {
+      if (!petAudioContext) return
+
+      try {
+        petAudioContext.stop()
+        petAudioContext.destroy()
+      } catch (error) {
+        console.warn('[index] pet audio stop failed:', error)
+      }
+
+      petAudioContext = null
+    },
+
+    pausePetAudio() {
+      if (!petAudioContext) return
+
+      try {
+        petAudioContext.pause()
+      } catch (error) {
+        console.warn('[index] pet audio pause failed:', error)
+      }
+    },
+
+    resumePetAudio() {
+      if (!petAudioContext) return
+
+      try {
+        petAudioContext.play()
+      } catch (error) {
+        console.warn('[index] pet audio resume failed:', error)
+      }
     },
   },
 })

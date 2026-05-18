@@ -94,6 +94,16 @@ button {
   color: #ffffff;
 }
 
+.nav-badge {
+  background: #d97a2c;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+  padding: 2px 8px;
+}
+
 .main {
   padding: 28px;
 }
@@ -103,6 +113,37 @@ button {
   display: flex;
   justify-content: space-between;
   margin-bottom: 22px;
+}
+
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.draft-badge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+.draft-badge.ok {
+  background: #e2f4e7;
+  color: #1f6f38;
+}
+
+.draft-badge.dirty {
+  background: #fff3df;
+  color: #a4540a;
+}
+
+.draft-badge.saving {
+  background: #eef2f8;
+  color: #2e4868;
 }
 
 .topbar h1 {
@@ -163,6 +204,11 @@ button:disabled {
 
 .metrics-grid {
   grid-template-columns: repeat(4, minmax(160px, 1fr));
+}
+
+.metric strong.long-text {
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .panel,
@@ -278,6 +324,87 @@ th {
 .panel-head button {
   background: #ffffff;
   color: #17211b;
+}
+
+.row-actions .danger-button {
+  background: #fff5f0;
+  border-color: #f4caba;
+  color: #9f3b17;
+}
+
+.row-actions .danger-button:hover {
+  background: #fde7dc;
+}
+
+.diff-list {
+  background: #f8faf8;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.diff-row {
+  align-items: flex-start;
+  border-bottom: 1px dashed #dce5df;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(140px, 30%) 1fr;
+  padding-bottom: 8px;
+}
+
+.diff-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.diff-values {
+  align-items: center;
+  color: #34453b;
+  display: flex;
+  flex-wrap: wrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.diff-before {
+  background: #fde7dc;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.diff-after {
+  background: #e2f4e7;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.warn-text {
+  color: #a4540a;
+}
+
+.auto-summary {
+  background: #f0f7ff;
+  border: 1px solid #c4ddf6;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.auto-summary strong {
+  color: #1d4a7a;
+  font-size: 13px;
+}
+
+.auto-summary span {
+  color: #2e5a8a;
+  line-height: 1.5;
 }
 
 .form-grid {

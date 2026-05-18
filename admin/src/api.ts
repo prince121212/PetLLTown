@@ -1,4 +1,4 @@
-import { AdminConfigState, BootstrapConfig, MediaCreateResult, MediaInspectResult, RoomMediaCreateResult } from './types'
+import { AdminState, BootstrapConfig, MediaCreateResult, MediaInspectResult, RoomMediaCreateResult } from './types'
 
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
@@ -18,55 +18,66 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
   return payload.data as T
 }
 
-export function getConfigState(): Promise<AdminConfigState> {
-  return requestJson<AdminConfigState>('/api/config/state')
+async function requestForm<T>(url: string, formData: FormData): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error?.message || `请求失败：${response.status}`)
+  }
+
+  return payload.data as T
 }
 
-export function saveConfig(config: BootstrapConfig): Promise<AdminConfigState> {
-  return requestJson<AdminConfigState>('/api/config', {
+export function getAdminState(): Promise<AdminState> {
+  return requestJson<AdminState>('/api/state')
+}
+
+export function saveDraft(config: BootstrapConfig): Promise<AdminState> {
+  return requestJson<AdminState>('/api/draft', {
     method: 'PUT',
     body: JSON.stringify({ config }),
   })
 }
 
-export async function createPetFromWebm(formData: FormData): Promise<MediaCreateResult> {
-  const response = await fetch('/api/media/pets/create-from-webm', {
-    method: 'POST',
-    body: formData,
+export function discardDraft(): Promise<AdminState> {
+  return requestJson<AdminState>('/api/draft', {
+    method: 'DELETE',
   })
-  const payload = await response.json().catch(() => ({}))
-
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error?.message || `素材处理失败：${response.status}`)
-  }
-
-  return payload.data as MediaCreateResult
 }
 
-export async function inspectPetWebm(formData: FormData): Promise<MediaInspectResult> {
-  const response = await fetch('/api/media/pets/inspect', {
+export function publishConfig(summary: string): Promise<AdminState> {
+  return requestJson<AdminState>('/api/publish', {
     method: 'POST',
-    body: formData,
+    body: JSON.stringify({ summary }),
   })
-  const payload = await response.json().catch(() => ({}))
-
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error?.message || `素材验收失败：${response.status}`)
-  }
-
-  return payload.data as MediaInspectResult
 }
 
-export async function createRoomFromMedia(formData: FormData): Promise<RoomMediaCreateResult> {
-  const response = await fetch('/api/media/rooms/create-from-media', {
+export function rollbackToVersion(versionId: string): Promise<AdminState> {
+  return requestJson<AdminState>('/api/rollback', {
     method: 'POST',
-    body: formData,
+    body: JSON.stringify({ versionId }),
   })
-  const payload = await response.json().catch(() => ({}))
+}
 
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error?.message || `背景素材处理失败：${response.status}`)
-  }
+export function inspectPetWebm(formData: FormData): Promise<MediaInspectResult> {
+  return requestForm<MediaInspectResult>('/api/media/pets/inspect', formData)
+}
 
-  return payload.data as RoomMediaCreateResult
+export function createPetFromWebm(formData: FormData): Promise<MediaCreateResult> {
+  return requestForm<MediaCreateResult>('/api/media/pets/create-from-webm', formData)
+}
+
+export function createRoomFromMedia(formData: FormData): Promise<RoomMediaCreateResult> {
+  return requestForm<RoomMediaCreateResult>('/api/media/rooms/create-from-media', formData)
+}
+
+export function resolveCloudUrl(fileID: string): Promise<{ url: string }> {
+  return requestJson<{ url: string }>('/api/resolve-url', {
+    method: 'POST',
+    body: JSON.stringify({ fileID }),
+  })
 }

@@ -6,6 +6,8 @@ cloud.init({
 
 const db = cloud.database()
 const CONFIG_COLLECTION = 'app_configs'
+const DRAFT_COLLECTION = 'admin_config_drafts'
+const VERSION_COLLECTION = 'admin_config_versions'
 const AUDIT_COLLECTION = 'admin_audit_logs'
 const CONFIG_DOC_ID = 'bootstrap'
 
@@ -59,18 +61,98 @@ async function setDocument(collection, id, data) {
   }
 }
 
+async function removeDocument(collection, id) {
+  try {
+    await db.collection(collection).doc(id).remove()
+  } catch (error) {
+    if (isMissingCollectionError(error) || isMissingDocumentError(error)) {
+      return
+    }
+    throw error
+  }
+}
+
 function isMissingCollectionError(error) {
   const message = error && error.message ? error.message : String(error)
   return message.includes('DATABASE_COLLECTION_NOT_EXIST') || message.includes('Db or Table not exist')
 }
 
+function isMissingDocumentError(error) {
+  const message = error && error.message ? error.message : String(error)
+  return message.includes('DOCUMENT_NOT_FOUND') || message.includes('NotFound') || message.includes('not exist')
+}
+
 async function readPublishedConfig() {
   const record = await getDocument(CONFIG_COLLECTION, CONFIG_DOC_ID)
-  return record && record.enabled !== false ? record.config || record : null
+  if (!record || record.enabled === false) return null
+  return record.config || record
+}
+
+async function readDraftConfig() {
+  const record = await getDocument(DRAFT_COLLECTION, CONFIG_DOC_ID)
+  if (!record || !record.config) return null
+  return record.config
+}
+
+async function writeDraftConfig(config, wxContext) {
+  await setDocument(DRAFT_COLLECTION, CONFIG_DOC_ID, {
+    enabled: true,
+    config,
+    status: 'draft',
+    updatedAt: new Date().toISOString(),
+    updatedBy: wxContext.OPENID || 'admin',
+  })
+}
+
+async function deleteDraftConfig() {
+  await removeDocument(DRAFT_COLLECTION, CONFIG_DOC_ID)
+}
+
+async function writePublishedConfig(config, wxContext) {
+  await setDocument(CONFIG_COLLECTION, CONFIG_DOC_ID, {
+    enabled: true,
+    config,
+    updatedAt: new Date().toISOString(),
+    updatedBy: wxContext.OPENID || 'admin',
+  })
+}
+
+async function writeVersionRecord({ version, config, summary, rollbackOf, wxContext }) {
+  await setDocument(VERSION_COLLECTION, version, {
+    version,
+    config,
+    summary: summary || '',
+    rollbackOf: rollbackOf || '',
+    publishedAt: new Date().toISOString(),
+    publishedBy: wxContext.OPENID || 'admin',
+  })
+}
+
+async function listVersions() {
+  const result = await db
+    .collection(VERSION_COLLECTION)
+    .orderBy('publishedAt', 'desc')
+    .limit(20)
+    .get()
+    .catch(() => ({ data: [] }))
+  const records = Array.isArray(result.data) ? result.data : []
+
+  return records.map((record) => ({
+    version: record.version || record._id || '',
+    summary: record.summary || '',
+    rollbackOf: record.rollbackOf || '',
+    publishedAt: record.publishedAt || '',
+    publishedBy: record.publishedBy || '',
+  }))
 }
 
 async function listAuditLogs() {
-  const result = await db.collection(AUDIT_COLLECTION).orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ data: [] }))
+  const result = await db
+    .collection(AUDIT_COLLECTION)
+    .orderBy('createdAt', 'desc')
+    .limit(30)
+    .get()
+    .catch(() => ({ data: [] }))
 
   return (result.data || []).map((record) => ({
     id: record._id || record.id || `${record.action}-${record.createdAt}`,
@@ -85,7 +167,7 @@ async function listAuditLogs() {
 
 async function writeAuditLog({ wxContext, action, target, summary }) {
   const createdAt = new Date().toISOString()
-  const id = `${versionId()}-${action}-${Math.random().toString(36).slice(2, 8)}`
+  const id = `${formatTimestamp(new Date())}-${action}-${Math.random().toString(36).slice(2, 8)}`
 
   await setDocument(AUDIT_COLLECTION, id, {
     action,
@@ -99,7 +181,8 @@ async function writeAuditLog({ wxContext, action, target, summary }) {
   })
 }
 
-function validateConfig(config) {
+function validateConfig(config, options) {
+  const strict = options && options.strict !== false
   const issues = []
   const pets = Array.isArray(config && config.pets) ? config.pets : []
   const rooms = Array.isArray(config && config.rooms) ? config.rooms : []
@@ -108,11 +191,19 @@ function validateConfig(config) {
   const petIds = new Set()
   const roomIds = new Set()
 
-  if (!enabledPets.some((pet) => pet.id === config.defaultPetId)) {
+  if (strict && !enabledPets.length) {
+    issues.push({ field: 'pets', message: '至少需要一个启用宠物' })
+  }
+
+  if (strict && !enabledRooms.length) {
+    issues.push({ field: 'rooms', message: '至少需要一个启用背景' })
+  }
+
+  if (strict && !enabledPets.some((pet) => pet.id === config.defaultPetId)) {
     issues.push({ field: 'defaultPetId', message: '默认宠物必须存在且启用' })
   }
 
-  if (!enabledRooms.some((room) => room.id === config.defaultRoomId)) {
+  if (strict && !enabledRooms.some((room) => room.id === config.defaultRoomId)) {
     issues.push({ field: 'defaultRoomId', message: '默认背景必须存在且启用' })
   }
 
@@ -131,7 +222,7 @@ function validateConfig(config) {
 
     if (pet.enabled === false) continue
 
-    if (!pet.videoUrl || !pet.thumbUrl) {
+    if (strict && (!pet.videoUrl || !pet.thumbUrl)) {
       issues.push({ field: `pets.${pet.id}`, message: `${pet.name || pet.id} 缺少视频或预览图` })
     }
 
@@ -157,7 +248,7 @@ function validateConfig(config) {
 
     if (room.enabled === false) continue
 
-    if (!room.mediaUrl) {
+    if (strict && !room.mediaUrl) {
       issues.push({ field: `rooms.${room.id}`, message: `${room.name || room.id} 缺少背景媒体` })
     }
 
@@ -182,41 +273,29 @@ function isAllowedAssetUrl(value) {
   )
 }
 
-function versionId() {
-  return `admin-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, 'Z')}`
+function buildVersionId() {
+  return `v-${formatTimestamp(new Date())}`
 }
 
-function normalizeConfig(config) {
-  if (!config || typeof config !== 'object') {
-    const error = new Error('配置格式不正确')
-    error.code = 'INVALID_CONFIG'
-    throw error
-  }
-
-  return config
+function formatTimestamp(date) {
+  return date.toISOString().replace(/[-:]/g, '').replace(/\..+$/, 'Z')
 }
 
-async function getEditableConfig() {
-  const config = await readPublishedConfig()
-
-  if (!config || typeof config !== 'object') {
-    const error = new Error('没有可编辑的启动配置')
-    error.code = 'CONFIG_NOT_FOUND'
-    throw error
-  }
-
-  return config
+function stampConfigVersion(config, version) {
+  const next = JSON.parse(JSON.stringify(config))
+  next.configVersion = version
+  return next
 }
 
-function prepareConfigForSave(config) {
+function normalizeForPersist(config) {
+  if (!config || typeof config !== 'object') return config
   const homeHint = config.homeHint || (config.home && config.home.hint) || ''
   const pets = Array.isArray(config.pets) ? config.pets : []
   const defaultPet = pets.find((pet) => pet.id === config.defaultPetId)
 
   return {
     ...config,
-    configVersion: versionId(),
-    defaultPetName: defaultPet && defaultPet.name ? defaultPet.name : config.defaultPetName || '',
+    defaultPetName: (defaultPet && defaultPet.name) || config.defaultPetName || '',
     homeHint,
     home: {
       ...(config.home || {}),
@@ -225,9 +304,58 @@ function prepareConfigForSave(config) {
   }
 }
 
-async function saveConfig(config, wxContext, summary) {
-  const nextConfig = prepareConfigForSave(config)
-  const issues = validateConfig(nextConfig)
+function hasConfigChanges(published, draft) {
+  if (!draft) return false
+  if (!published) return true
+  return JSON.stringify(stripVolatile(published)) !== JSON.stringify(stripVolatile(draft))
+}
+
+function stripVolatile(config) {
+  if (!config || typeof config !== 'object') return config
+  const clone = JSON.parse(JSON.stringify(config))
+  delete clone.configVersion
+  delete clone.serverTime
+  return clone
+}
+
+function summarizeConfig(config) {
+  const pets = Array.isArray(config && config.pets) ? config.pets : []
+  const rooms = Array.isArray(config && config.rooms) ? config.rooms : []
+  const enabledPets = pets.filter((pet) => pet.enabled !== false).length
+  const enabledRooms = rooms.filter((room) => room.enabled !== false).length
+  return `${enabledPets} 个启用宠物，${enabledRooms} 个启用背景`
+}
+
+function normalizeConfigInput(config) {
+  if (!config || typeof config !== 'object') {
+    const error = new Error('配置格式不正确')
+    error.code = 'INVALID_CONFIG'
+    throw error
+  }
+  return config
+}
+
+async function getState() {
+  const published = await readPublishedConfig()
+  const draft = await readDraftConfig()
+  const versions = await listVersions()
+  const auditLogs = await listAuditLogs()
+  const draftIssues = draft ? validateConfig(draft, { strict: false }) : []
+
+  return {
+    published,
+    draft,
+    hasDraft: Boolean(draft),
+    hasDraftChanges: draft ? hasConfigChanges(published, draft) : false,
+    draftIssues,
+    versions,
+    auditLogs,
+  }
+}
+
+async function handleSaveDraft({ config, wxContext }) {
+  const normalized = normalizeForPersist(normalizeConfigInput(config))
+  const issues = validateConfig(normalized, { strict: false })
 
   if (issues.length) {
     const error = new Error(issues.map((issue) => issue.message).join('；'))
@@ -236,189 +364,138 @@ async function saveConfig(config, wxContext, summary) {
     throw error
   }
 
-  await setDocument(CONFIG_COLLECTION, CONFIG_DOC_ID, {
-    enabled: true,
-    config: nextConfig,
-    updatedAt: new Date().toISOString(),
-    updatedBy: wxContext.OPENID || 'admin',
-  })
+  await writeDraftConfig(normalized, wxContext)
   await writeAuditLog({
     wxContext,
-    action: 'saveConfig',
+    action: 'saveDraft',
     target: CONFIG_DOC_ID,
-    summary,
+    summary: `保存草稿：${summarizeConfig(normalized)}`,
   })
-
-  return nextConfig
 }
 
-function upsertById(items, item) {
-  const index = items.findIndex((value) => value.id === item.id)
-
-  if (index === -1) {
-    return [...items, item]
-  }
-
-  return items.map((value, valueIndex) => (valueIndex === index ? item : value))
+async function handleDiscardDraft({ wxContext }) {
+  await deleteDraftConfig()
+  await writeAuditLog({
+    wxContext,
+    action: 'discardDraft',
+    target: CONFIG_DOC_ID,
+    summary: '丢弃草稿，恢复到当前线上',
+  })
 }
 
-async function getState(wxContext) {
-  const config = await readPublishedConfig()
-  const auditLogs = await listAuditLogs()
+async function handlePublish({ summary, wxContext }) {
+  const draft = await readDraftConfig()
 
-  return {
-    ok: true,
-    data: {
-      config,
-      auditLogs,
-      meta: {
-        openIdReady: Boolean(wxContext.OPENID),
-      },
-    },
+  if (!draft) {
+    const error = new Error('当前没有可发布的草稿')
+    error.code = 'NO_DRAFT'
+    throw error
   }
+
+  const issues = validateConfig(draft, { strict: true })
+  if (issues.length) {
+    const error = new Error(issues.map((issue) => issue.message).join('；'))
+    error.code = 'VALIDATION_FAILED'
+    error.issues = issues
+    throw error
+  }
+
+  const version = buildVersionId()
+  const finalConfig = stampConfigVersion(normalizeForPersist(draft), version)
+
+  await writePublishedConfig(finalConfig, wxContext)
+  await writeVersionRecord({ version, config: finalConfig, summary, wxContext })
+  await deleteDraftConfig()
+  await writeAuditLog({
+    wxContext,
+    action: 'publishConfig',
+    target: version,
+    summary: summary || `发布配置 ${version}`,
+  })
+}
+
+async function handleRollback({ versionId, wxContext }) {
+  if (!versionId) {
+    const error = new Error('缺少 versionId')
+    error.code = 'INVALID_VERSION'
+    throw error
+  }
+
+  const record = await getDocument(VERSION_COLLECTION, versionId)
+  if (!record || !record.config) {
+    const error = new Error(`版本 ${versionId} 不存在`)
+    error.code = 'VERSION_NOT_FOUND'
+    throw error
+  }
+
+  const newVersion = buildVersionId()
+  const finalConfig = stampConfigVersion(record.config, newVersion)
+
+  await writePublishedConfig(finalConfig, wxContext)
+  await writeVersionRecord({
+    version: newVersion,
+    config: finalConfig,
+    summary: `回滚到 ${versionId}`,
+    rollbackOf: versionId,
+    wxContext,
+  })
+  await deleteDraftConfig()
+  await writeAuditLog({
+    wxContext,
+    action: 'rollbackConfig',
+    target: newVersion,
+    summary: `回滚到 ${versionId}`,
+  })
 }
 
 exports.main = async (event = {}) => {
-  const wxContext = assertAdmin()
-  const action = typeof event.action === 'string' ? event.action : 'getState'
+  try {
+    const wxContext = assertAdmin()
+    const action = typeof event.action === 'string' ? event.action : 'getState'
 
-  if (action === 'getState') {
-    return getState(wxContext)
-  }
-
-  if (action === 'getConfig') {
-    return {
-      ok: true,
-      data: await readPublishedConfig(),
-    }
-  }
-
-  if (action === 'saveConfig') {
-    const config = normalizeConfig(event.config)
-
-    await saveConfig(config, wxContext, '保存启动配置')
-
-    return {
-      ok: true,
-      data: await getState(wxContext).then((result) => result.data),
-    }
-  }
-
-  if (action === 'listPets') {
-    const config = await getEditableConfig()
-
-    return {
-      ok: true,
-      data: config.pets || [],
-    }
-  }
-
-  if (action === 'upsertPet') {
-    if (!event.pet || typeof event.pet !== 'object' || !event.pet.id) {
-      return {
-        ok: false,
-        error: {
-          code: 'INVALID_PET',
-          message: '宠物数据格式不正确',
-        },
-      }
+    if (action === 'getState') {
+      return { ok: true, data: await getState() }
     }
 
-    const config = normalizeConfig(await getEditableConfig())
-    config.pets = upsertById(Array.isArray(config.pets) ? config.pets : [], event.pet)
-
-    if (!config.defaultPetId || !config.pets.some((pet) => pet.id === config.defaultPetId && pet.enabled !== false)) {
-      config.defaultPetId = event.pet.id
-      config.defaultPetName = event.pet.name || config.defaultPetName
+    if (action === 'saveDraft') {
+      await handleSaveDraft({ config: event.config, wxContext })
+      return { ok: true, data: await getState() }
     }
 
-    await saveConfig(config, wxContext, `保存宠物 ${event.pet.id}`)
-
-    return getState(wxContext)
-  }
-
-  if (action === 'disablePet') {
-    const petId = String(event.petId || '')
-    const config = normalizeConfig(await getEditableConfig())
-    config.pets = (config.pets || []).map((pet) => (pet.id === petId ? { ...pet, enabled: false } : pet))
-
-    if (config.defaultPetId === petId) {
-      const fallback = config.pets.find((pet) => pet.enabled !== false)
-
-      if (fallback) {
-        config.defaultPetId = fallback.id
-        config.defaultPetName = fallback.name || config.defaultPetName
-        config.homeMedia = {
-          ...(config.homeMedia || {}),
-          petVideoUrl: fallback.videoUrl || (config.homeMedia && config.homeMedia.petVideoUrl) || '',
-        }
-      }
+    if (action === 'discardDraft') {
+      await handleDiscardDraft({ wxContext })
+      return { ok: true, data: await getState() }
     }
 
-    await saveConfig(config, wxContext, `隐藏宠物 ${petId}`)
+    if (action === 'publish') {
+      await handlePublish({ summary: typeof event.summary === 'string' ? event.summary : '', wxContext })
+      return { ok: true, data: await getState() }
+    }
 
-    return getState(wxContext)
-  }
+    if (action === 'rollback') {
+      await handleRollback({ versionId: typeof event.versionId === 'string' ? event.versionId : '', wxContext })
+      return { ok: true, data: await getState() }
+    }
 
-  if (action === 'listRooms') {
-    const config = await getEditableConfig()
+    if (action === 'listVersions') {
+      return { ok: true, data: await listVersions() }
+    }
 
     return {
-      ok: true,
-      data: config.rooms || [],
+      ok: false,
+      error: {
+        code: 'UNKNOWN_ACTION',
+        message: `未知操作：${action}`,
+      },
     }
-  }
-
-  if (action === 'upsertRoom') {
-    if (!event.room || typeof event.room !== 'object' || !event.room.id) {
-      return {
-        ok: false,
-        error: {
-          code: 'INVALID_ROOM',
-          message: '背景数据格式不正确',
-        },
-      }
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        code: error && error.code ? error.code : 'INTERNAL_ERROR',
+        message: error && error.message ? error.message : String(error),
+        issues: error && error.issues ? error.issues : undefined,
+      },
     }
-
-    const config = normalizeConfig(await getEditableConfig())
-    config.rooms = upsertById(Array.isArray(config.rooms) ? config.rooms : [], event.room)
-
-    if (!config.defaultRoomId || !config.rooms.some((room) => room.id === config.defaultRoomId && room.enabled !== false)) {
-      config.defaultRoomId = event.room.id
-    }
-
-    await saveConfig(config, wxContext, `保存背景 ${event.room.id}`)
-
-    return getState(wxContext)
-  }
-
-  if (action === 'disableRoom') {
-    const roomId = String(event.roomId || '')
-    const config = normalizeConfig(await getEditableConfig())
-    config.rooms = (config.rooms || []).map((room) => (room.id === roomId ? { ...room, enabled: false } : room))
-
-    if (config.defaultRoomId === roomId) {
-      const fallback = config.rooms.find((room) => room.enabled !== false)
-
-      if (fallback) {
-        config.defaultRoomId = fallback.id
-        config.homeMedia = {
-          ...(config.homeMedia || {}),
-          backgroundVideoUrl: fallback.mediaUrl || (config.homeMedia && config.homeMedia.backgroundVideoUrl) || '',
-        }
-      }
-    }
-
-    await saveConfig(config, wxContext, `隐藏背景 ${roomId}`)
-
-    return getState(wxContext)
-  }
-
-  return {
-    ok: false,
-    error: {
-      code: 'UNKNOWN_ACTION',
-      message: `未知操作：${action}`,
-    },
   }
 }

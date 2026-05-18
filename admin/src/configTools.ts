@@ -39,7 +39,12 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
   }
 }
 
-export function validateConfig(config: BootstrapConfig): ValidationIssue[] {
+export interface ValidateOptions {
+  strict?: boolean
+}
+
+export function validateConfig(config: BootstrapConfig, options: ValidateOptions = {}): ValidationIssue[] {
+  const strict = options.strict !== false
   const issues: ValidationIssue[] = []
   const enabledPets = config.pets.filter((pet) => pet.enabled !== false)
   const enabledRooms = config.rooms.filter((room) => room.enabled !== false)
@@ -117,11 +122,19 @@ export function validateConfig(config: BootstrapConfig): ValidationIssue[] {
     }
   }
 
-  if (!enabledPets.some((pet) => pet.id === config.defaultPetId)) {
+  if (strict && !enabledPets.length) {
+    issues.push({ field: 'pets', message: '至少需要一个启用宠物' })
+  }
+
+  if (strict && !enabledRooms.length) {
+    issues.push({ field: 'rooms', message: '至少需要一个启用背景' })
+  }
+
+  if (strict && !enabledPets.some((pet) => pet.id === config.defaultPetId)) {
     issues.push({ field: 'defaultPetId', message: '默认宠物必须存在且启用' })
   }
 
-  if (!enabledRooms.some((room) => room.id === config.defaultRoomId)) {
+  if (strict && !enabledRooms.some((room) => room.id === config.defaultRoomId)) {
     issues.push({ field: 'defaultRoomId', message: '默认背景必须存在且启用' })
   }
 
@@ -188,6 +201,121 @@ export function upsertRoom(config: BootstrapConfig, room: RoomOption): Bootstrap
   return next
 }
 
+export function togglePetEnabled(config: BootstrapConfig, petId: string): BootstrapConfig {
+  const next = cloneConfig(config)
+  next.pets = next.pets.map((item) => (item.id === petId ? { ...item, enabled: item.enabled === false } : item))
+  const defaultPet = next.pets.find((item) => item.id === next.defaultPetId)
+
+  if (!defaultPet || defaultPet.enabled === false) {
+    const fallback = next.pets.find((item) => item.enabled !== false)
+
+    if (fallback) {
+      next.defaultPetId = fallback.id
+      next.defaultPetName = fallback.name
+      next.homeMedia.petVideoUrl = fallback.videoUrl || next.homeMedia.petVideoUrl
+    }
+  }
+
+  return next
+}
+
+export function toggleRoomEnabled(config: BootstrapConfig, roomId: string): BootstrapConfig {
+  const next = cloneConfig(config)
+  next.rooms = next.rooms.map((item) => (item.id === roomId ? { ...item, enabled: item.enabled === false } : item))
+  const defaultRoom = next.rooms.find((item) => item.id === next.defaultRoomId)
+
+  if (!defaultRoom || defaultRoom.enabled === false) {
+    const fallback = next.rooms.find((item) => item.enabled !== false)
+
+    if (fallback) {
+      next.defaultRoomId = fallback.id
+      next.homeMedia.backgroundVideoUrl = fallback.mediaUrl || next.homeMedia.backgroundVideoUrl
+    }
+  }
+
+  return next
+}
+
+export function removePet(config: BootstrapConfig, petId: string): BootstrapConfig {
+  const next = cloneConfig(config)
+  next.pets = next.pets.filter((item) => item.id !== petId)
+
+  if (next.defaultPetId === petId) {
+    const fallback = next.pets.find((item) => item.enabled !== false) || next.pets[0]
+    if (fallback) {
+      next.defaultPetId = fallback.id
+      next.defaultPetName = fallback.name
+      next.homeMedia.petVideoUrl = fallback.videoUrl || next.homeMedia.petVideoUrl
+    } else {
+      next.defaultPetId = ''
+      next.defaultPetName = ''
+    }
+  }
+
+  return next
+}
+
+export function removeRoom(config: BootstrapConfig, roomId: string): BootstrapConfig {
+  const next = cloneConfig(config)
+  next.rooms = next.rooms.filter((item) => item.id !== roomId)
+
+  if (next.defaultRoomId === roomId) {
+    const fallback = next.rooms.find((item) => item.enabled !== false) || next.rooms[0]
+    if (fallback) {
+      next.defaultRoomId = fallback.id
+      next.homeMedia.backgroundVideoUrl = fallback.mediaUrl || next.homeMedia.backgroundVideoUrl
+    } else {
+      next.defaultRoomId = ''
+    }
+  }
+
+  return next
+}
+
+export interface ConfigDiffEntry {
+  path: string
+  before: unknown
+  after: unknown
+}
+
+export function diffConfigs(before: BootstrapConfig | null, after: BootstrapConfig | null): ConfigDiffEntry[] {
+  if (!before && !after) return []
+  const entries: ConfigDiffEntry[] = []
+  walkDiff('', before as unknown, after as unknown, entries)
+  return entries
+}
+
+function walkDiff(path: string, before: unknown, after: unknown, entries: ConfigDiffEntry[]) {
+  if (Object.is(before, after)) return
+
+  if (
+    before === null ||
+    after === null ||
+    typeof before !== 'object' ||
+    typeof after !== 'object' ||
+    Array.isArray(before) !== Array.isArray(after)
+  ) {
+    entries.push({ path: path || '(root)', before, after })
+    return
+  }
+
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const length = Math.max(before.length, after.length)
+    for (let index = 0; index < length; index += 1) {
+      walkDiff(`${path}[${index}]`, before[index], after[index], entries)
+    }
+    return
+  }
+
+  const beforeRecord = before as Record<string, unknown>
+  const afterRecord = after as Record<string, unknown>
+  const keys = new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])
+  for (const key of keys) {
+    const childPath = path ? `${path}.${key}` : key
+    walkDiff(childPath, beforeRecord[key], afterRecord[key], entries)
+  }
+}
+
 function isAllowedAssetUrl(value: string): boolean {
   return (
     value.startsWith('cloud://') ||
@@ -196,4 +324,105 @@ function isAllowedAssetUrl(value: string): boolean {
     value.startsWith('http://localhost') ||
     value.startsWith('http://127.0.0.1')
   )
+}
+
+export function nextSortOrder(config: BootstrapConfig): number {
+  const max = config.pets.reduce((acc, pet) => Math.max(acc, pet.frameOffset || 0), 0)
+  return max + 1
+}
+
+export function generateDiffSummary(
+  before: BootstrapConfig | null,
+  after: BootstrapConfig | null,
+): string {
+  if (!before || !after) return '初始化配置'
+
+  const lines: string[] = []
+
+  const beforePetIds = new Set((before.pets || []).map((p) => p.id))
+  const afterPetIds = new Set((after.pets || []).map((p) => p.id))
+  const addedPets = (after.pets || []).filter((p) => !beforePetIds.has(p.id))
+  const removedPets = (before.pets || []).filter((p) => !afterPetIds.has(p.id))
+
+  for (const pet of addedPets) {
+    lines.push(`新增宠物「${pet.name || pet.id}」`)
+  }
+  for (const pet of removedPets) {
+    lines.push(`移除宠物「${pet.name || pet.id}」`)
+  }
+
+  for (const afterPet of after.pets || []) {
+    const beforePet = (before.pets || []).find((p) => p.id === afterPet.id)
+    if (!beforePet) continue
+
+    if (beforePet.enabled !== false && afterPet.enabled === false) {
+      lines.push(`隐藏宠物「${afterPet.name}」`)
+    } else if (beforePet.enabled === false && afterPet.enabled !== false) {
+      lines.push(`启用宠物「${afterPet.name}」`)
+    }
+
+    if (beforePet.name !== afterPet.name) {
+      lines.push(`宠物「${beforePet.name}」改名为「${afterPet.name}」`)
+    }
+    if (beforePet.videoUrl !== afterPet.videoUrl && afterPet.videoUrl) {
+      lines.push(`更新「${afterPet.name}」的视频素材`)
+    }
+    if (beforePet.audioUrl !== afterPet.audioUrl && afterPet.audioUrl) {
+      lines.push(`更新「${afterPet.name}」的音频`)
+    }
+    if (beforePet.thumbUrl !== afterPet.thumbUrl && afterPet.thumbUrl) {
+      lines.push(`更新「${afterPet.name}」的预览图`)
+    }
+  }
+
+  const beforeRoomIds = new Set((before.rooms || []).map((r) => r.id))
+  const afterRoomIds = new Set((after.rooms || []).map((r) => r.id))
+  const addedRooms = (after.rooms || []).filter((r) => !beforeRoomIds.has(r.id))
+  const removedRooms = (before.rooms || []).filter((r) => !afterRoomIds.has(r.id))
+
+  for (const room of addedRooms) {
+    lines.push(`新增背景「${room.name || room.id}」`)
+  }
+  for (const room of removedRooms) {
+    lines.push(`移除背景「${room.name || room.id}」`)
+  }
+
+  for (const afterRoom of after.rooms || []) {
+    const beforeRoom = (before.rooms || []).find((r) => r.id === afterRoom.id)
+    if (!beforeRoom) continue
+
+    if (beforeRoom.enabled !== false && afterRoom.enabled === false) {
+      lines.push(`隐藏背景「${afterRoom.name}」`)
+    } else if (beforeRoom.enabled === false && afterRoom.enabled !== false) {
+      lines.push(`启用背景「${afterRoom.name}」`)
+    }
+
+    if (beforeRoom.name !== afterRoom.name) {
+      lines.push(`背景「${beforeRoom.name}」改名为「${afterRoom.name}」`)
+    }
+  }
+
+  if (before.defaultPetId !== after.defaultPetId) {
+    const pet = (after.pets || []).find((p) => p.id === after.defaultPetId)
+    lines.push(`默认宠物改为「${pet?.name || after.defaultPetId}」`)
+  }
+
+  if (before.defaultRoomId !== after.defaultRoomId) {
+    const room = (after.rooms || []).find((r) => r.id === after.defaultRoomId)
+    lines.push(`默认背景改为「${room?.name || after.defaultRoomId}」`)
+  }
+
+  if (before.homeHint !== after.homeHint) {
+    lines.push(`首页提示改为「${after.homeHint}」`)
+  }
+
+  if (before.appName !== after.appName) {
+    lines.push(`应用名称改为「${after.appName}」`)
+  }
+
+  if (!lines.length) {
+    return '配置微调'
+  }
+
+  return lines.join('；')
 }

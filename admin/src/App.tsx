@@ -5,36 +5,60 @@ import {
   CheckCircle2,
   CloudUpload,
   ExternalLink,
+  GitBranch,
   Home,
   Image,
   ListChecks,
   Loader2,
   PawPrint,
   RefreshCw,
+  RotateCcw,
   Save,
+  Send,
   Star,
+  Trash2,
+  Undo2,
 } from 'lucide-react'
-import { createPetFromWebm, createRoomFromMedia, getConfigState, inspectPetWebm, saveConfig } from './api'
+import {
+  createPetFromWebm,
+  createRoomFromMedia,
+  discardDraft,
+  getAdminState,
+  inspectPetWebm,
+  publishConfig,
+  rollbackToVersion,
+  saveDraft,
+} from './api'
 import {
   cloneConfig,
+  diffConfigs,
+  generateDiffSummary,
+  nextSortOrder,
   normalizeBootstrapConfig,
+  removePet,
+  removeRoom,
   setDefaultPet,
   setDefaultRoom,
+  togglePetEnabled,
+  toggleRoomEnabled,
   upsertPet,
   upsertRoom,
   validateConfig,
 } from './configTools'
 import {
   AdminAuditLog,
+  AdminState,
   BootstrapConfig,
   MediaCreateResult,
   MediaInspectResult,
   PetOption,
   RoomMediaCreateResult,
   RoomOption,
+  ValidationIssue,
+  VersionRecord,
 } from './types'
 
-type RouteKey = 'dashboard' | 'pets' | 'rooms' | 'home' | 'media'
+type RouteKey = 'dashboard' | 'pets' | 'rooms' | 'home' | 'media' | 'publish'
 
 const navItems: Array<{ key: RouteKey; path: string; label: string; icon: typeof Home }> = [
   { key: 'dashboard', path: '/dashboard', label: '概览', icon: Home },
@@ -42,14 +66,15 @@ const navItems: Array<{ key: RouteKey; path: string; label: string; icon: typeof
   { key: 'rooms', path: '/rooms', label: '背景', icon: Image },
   { key: 'home', path: '/home', label: '首页配置', icon: ListChecks },
   { key: 'media', path: '/media', label: '素材自动化', icon: CloudUpload },
+  { key: 'publish', path: '/publish', label: '发布中心', icon: GitBranch },
 ]
 
-function emptyPet(): PetOption {
+function emptyPet(sortOrder: number): PetOption {
   return {
     id: '',
     name: '',
     subtitle: '',
-    frameOffset: 0,
+    frameOffset: sortOrder,
     manifestKey: '',
     videoUrl: '',
     thumbUrl: '',
@@ -73,28 +98,56 @@ function emptyRoom(): RoomOption {
 export function App() {
   const queryClient = useQueryClient()
   const location = useLocation()
-  const stateQuery = useQuery({
-    queryKey: ['config-state'],
-    queryFn: getConfigState,
-  })
-  const saveMutation = useMutation({
-    mutationFn: saveConfig,
-    onSuccess: (data) => queryClient.setQueryData(['config-state'], data),
+  const stateQuery = useQuery<AdminState>({
+    queryKey: ['admin-state'],
+    queryFn: getAdminState,
   })
 
-  const configState = stateQuery.data
-  const config = useMemo(
-    () => (configState?.config ? normalizeBootstrapConfig(configState.config) : undefined),
-    [configState?.config],
+  const applyState = (next: AdminState) => {
+    queryClient.setQueryData(['admin-state'], next)
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: saveDraft,
+    onSuccess: applyState,
+  })
+  const discardMutation = useMutation({
+    mutationFn: discardDraft,
+    onSuccess: applyState,
+  })
+  const publishMutation = useMutation({
+    mutationFn: publishConfig,
+    onSuccess: applyState,
+  })
+  const rollbackMutation = useMutation({
+    mutationFn: rollbackToVersion,
+    onSuccess: applyState,
+  })
+
+  const state = stateQuery.data
+  const published = useMemo(
+    () => (state?.published ? normalizeBootstrapConfig(state.published) : undefined),
+    [state?.published],
   )
+  const draft = useMemo(
+    () => (state?.draft ? normalizeBootstrapConfig(state.draft) : undefined),
+    [state?.draft],
+  )
+  const workingConfig = draft || published
+  const issues = useMemo(
+    () => (workingConfig ? validateConfig(workingConfig, { strict: true }) : []),
+    [workingConfig],
+  )
+
   const title = navItems.find((item) => location.pathname.startsWith(item.path))?.label || '概览'
-  const issues = useMemo(() => (config ? validateConfig(config) : []), [config])
 
   function updateConfig(next: BootstrapConfig) {
     saveMutation.mutate(next)
   }
 
-  const mutationError = saveMutation.error
+  const mutationError =
+    saveMutation.error || discardMutation.error || publishMutation.error || rollbackMutation.error
+  const saving = saveMutation.isPending || discardMutation.isPending
 
   return (
     <div className="app-shell">
@@ -110,10 +163,12 @@ export function App() {
         <nav className="nav-list">
           {navItems.map((item) => {
             const Icon = item.icon
+            const showBadge = item.key === 'publish' && state?.hasDraftChanges
             return (
               <NavLink className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} key={item.key} to={item.path}>
                 <Icon size={18} />
                 <span>{item.label}</span>
+                {showBadge && <span className="nav-badge">未发布</span>}
               </NavLink>
             )
           })}
@@ -125,12 +180,17 @@ export function App() {
           <div>
             <h1>{title}</h1>
             <p>
-              {configState?.meta?.envId ? `环境：${configState.meta.envId}` : '当前管理线上启动配置、宠物和背景素材。'}
+              {state?.meta?.envId
+                ? `环境：${state.meta.envId}`
+                : '当前管理线上启动配置、宠物和背景素材。'}
             </p>
           </div>
-          <button className="icon-button" onClick={() => stateQuery.refetch()} title="刷新配置" type="button">
-            <RefreshCw size={18} />
-          </button>
+          <div className="topbar-actions">
+            <DraftBadge state={state} saving={saving} />
+            <button className="icon-button" onClick={() => stateQuery.refetch()} title="刷新配置" type="button">
+              <RefreshCw size={18} />
+            </button>
+          </div>
         </header>
 
         {stateQuery.isLoading && (
@@ -141,30 +201,86 @@ export function App() {
         )}
 
         {stateQuery.error && (
-          <div className="error-state">{stateQuery.error instanceof Error ? stateQuery.error.message : '配置读取失败'}</div>
+          <div className="error-state">
+            {stateQuery.error instanceof Error ? stateQuery.error.message : '配置读取失败'}
+          </div>
         )}
 
         {mutationError && (
-          <div className="error-state">{mutationError instanceof Error ? mutationError.message : '操作失败'}</div>
+          <div className="error-state">
+            {mutationError instanceof Error ? mutationError.message : '操作失败'}
+          </div>
         )}
 
-        {config && configState && (
+        {workingConfig && state && published && (
           <Routes>
             <Route path="/" element={<Navigate replace to="/dashboard" />} />
             <Route
               path="/dashboard"
               element={
                 <Dashboard
-                  auditLogs={configState.auditLogs || []}
-                  config={config}
+                  auditLogs={state.auditLogs || []}
+                  config={workingConfig}
+                  hasDraftChanges={state.hasDraftChanges}
+                  hasDraft={state.hasDraft}
                   issues={issues}
+                  versions={state.versions}
                 />
               }
             />
-            <Route path="/pets" element={<PetsView config={config} onChange={updateConfig} saving={saveMutation.isPending} />} />
-            <Route path="/rooms" element={<RoomsView config={config} onChange={updateConfig} saving={saveMutation.isPending} />} />
-            <Route path="/home" element={<HomeView config={config} onChange={updateConfig} saving={saveMutation.isPending} />} />
-            <Route path="/media" element={<MediaView config={config} onChange={updateConfig} />} />
+            <Route
+              path="/pets"
+              element={
+                <PetsView
+                  config={workingConfig}
+                  onChange={updateConfig}
+                  saving={saving}
+                />
+              }
+            />
+            <Route
+              path="/rooms"
+              element={
+                <RoomsView
+                  config={workingConfig}
+                  onChange={updateConfig}
+                  saving={saving}
+                />
+              }
+            />
+            <Route
+              path="/home"
+              element={
+                <HomeView
+                  config={workingConfig}
+                  onChange={updateConfig}
+                  saving={saving}
+                />
+              }
+            />
+            <Route
+              path="/media"
+              element={
+                <MediaView onState={applyState} />
+              }
+            />
+            <Route
+              path="/publish"
+              element={
+                <PublishView
+                  state={state}
+                  draft={draft}
+                  published={published}
+                  issues={issues}
+                  onPublish={(summary) => publishMutation.mutate(summary)}
+                  onDiscard={() => discardMutation.mutate()}
+                  onRollback={(versionId) => rollbackMutation.mutate(versionId)}
+                  publishing={publishMutation.isPending}
+                  discarding={discardMutation.isPending}
+                  rolling={rollbackMutation.isPending}
+                />
+              }
+            />
             <Route path="*" element={<Navigate replace to="/dashboard" />} />
           </Routes>
         )}
@@ -173,29 +289,60 @@ export function App() {
   )
 }
 
+function DraftBadge({ state, saving }: { state: AdminState | undefined; saving: boolean }) {
+  if (!state) return null
+
+  if (saving) {
+    return (
+      <span className="draft-badge saving">
+        <Loader2 className="spin" size={14} />
+        保存中
+      </span>
+    )
+  }
+
+  if (state.hasDraftChanges) {
+    return <span className="draft-badge dirty">草稿有未发布改动</span>
+  }
+
+  if (state.hasDraft) {
+    return <span className="draft-badge ok">草稿与线上一致</span>
+  }
+
+  return <span className="draft-badge ok">无草稿</span>
+}
+
 function Dashboard({
   auditLogs,
   config,
+  hasDraftChanges,
+  hasDraft,
   issues,
+  versions,
 }: {
   auditLogs: AdminAuditLog[]
   config: BootstrapConfig
-  issues: ReturnType<typeof validateConfig>
+  hasDraftChanges: boolean
+  hasDraft: boolean
+  issues: ValidationIssue[]
+  versions: VersionRecord[]
 }) {
   const enabledPets = config.pets.filter((pet) => pet.enabled !== false)
   const enabledRooms = config.rooms.filter((room) => room.enabled !== false)
+  const draftStatus = hasDraftChanges ? '有未发布改动' : hasDraft ? '草稿与线上一致' : '无草稿'
+  const draftTone: 'ok' | 'warn' = hasDraftChanges ? 'warn' : 'ok'
 
   return (
     <section className="grid metrics-grid">
       <Metric title="启用宠物" value={`${enabledPets.length}/${config.pets.length}`} />
       <Metric title="启用背景" value={`${enabledRooms.length}/${config.rooms.length}`} />
-      <Metric title="配置状态" value="直接生效" tone="ok" />
+      <Metric title="草稿状态" value={draftStatus} tone={draftTone} />
       <Metric title="校验问题" value={`${issues.length}`} tone={issues.length ? 'warn' : 'ok'} />
       <div className="panel span-2">
         <h2>当前默认</h2>
         <div className="summary-list">
-          <span>默认宠物：{config.pets.find((pet) => pet.id === config.defaultPetId)?.name || config.defaultPetId}</span>
-          <span>默认背景：{config.rooms.find((room) => room.id === config.defaultRoomId)?.name || config.defaultRoomId}</span>
+          <span>默认宠物：{config.pets.find((pet) => pet.id === config.defaultPetId)?.name || config.defaultPetId || '-'}</span>
+          <span>默认背景：{config.rooms.find((room) => room.id === config.defaultRoomId)?.name || config.defaultRoomId || '-'}</span>
           <span>首页提示：{config.homeHint}</span>
           <span>配置版本：{config.configVersion}</span>
         </div>
@@ -203,11 +350,30 @@ function Dashboard({
       <div className="panel span-2">
         <h2>配置校验</h2>
         {issues.length === 0 ? (
-          <div className="result-box ok"><CheckCircle2 size={18} />当前配置可用</div>
+          <div className="result-box ok">
+            <CheckCircle2 size={18} />
+            当前配置可用
+          </div>
         ) : (
           <div className="issue-list">
             {issues.map((issue) => (
               <div key={`${issue.field}-${issue.message}`}>{issue.message}</div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="panel span-2">
+        <h2>最近发布</h2>
+        {versions.length === 0 ? (
+          <span className="muted">还没有发布过配置</span>
+        ) : (
+          <div className="audit-list">
+            {versions.slice(0, 5).map((version) => (
+              <div className="audit-item" key={version.version}>
+                <strong>{version.summary || version.version}</strong>
+                <span>{version.version}</span>
+                <small>{formatTime(version.publishedAt)} / {version.publishedBy || 'admin'}</small>
+              </div>
             ))}
           </div>
         )}
@@ -229,36 +395,37 @@ function Metric({ title, value, tone }: { title: string; value: string; tone?: '
   )
 }
 
-function PetsView({ config, onChange, saving }: { config: BootstrapConfig; onChange: (config: BootstrapConfig) => void; saving: boolean }) {
+function PetsView({
+  config,
+  onChange,
+  saving,
+}: {
+  config: BootstrapConfig
+  onChange: (config: BootstrapConfig) => void
+  saving: boolean
+}) {
   const [editing, setEditing] = useState<PetOption | null>(null)
 
   function togglePet(pet: PetOption) {
-    const next = cloneConfig(config)
-    next.pets = next.pets.map((item) => (item.id === pet.id ? { ...item, enabled: item.enabled === false } : item))
-    const defaultPet = next.pets.find((item) => item.id === next.defaultPetId)
-
-    if (!defaultPet || defaultPet.enabled === false) {
-      const fallback = next.pets.find((item) => item.enabled !== false)
-
-      if (fallback) {
-        next.defaultPetId = fallback.id
-        next.defaultPetName = fallback.name
-        next.homeMedia.petVideoUrl = fallback.videoUrl || next.homeMedia.petVideoUrl
-      }
-    }
-
-    onChange(next)
+    onChange(togglePetEnabled(config, pet.id))
   }
 
   function setDefault(pet: PetOption) {
     onChange(setDefaultPet(config, pet.id))
   }
 
+  function deletePet(pet: PetOption) {
+    if (!window.confirm(`确认从配置中删除「${pet.name || pet.id}」？\n云存储里的素材不会删除，仅从启动配置移除。`)) return
+    onChange(removePet(config, pet.id))
+  }
+
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>宠物列表</h2>
-        <button className="primary-button" onClick={() => setEditing(emptyPet())} type="button">新增宠物</button>
+        <button className="primary-button" onClick={() => setEditing(emptyPet(nextSortOrder(config)))} type="button">
+          新增宠物
+        </button>
       </div>
       <DataTable
         columns={['状态', '预览', '名称', '副标题', 'ID', '排序', '默认', '操作']}
@@ -272,8 +439,18 @@ function PetsView({ config, onChange, saving }: { config: BootstrapConfig; onCha
           config.defaultPetId === pet.id ? <StarLabel /> : '否',
           <div className="row-actions">
             <button onClick={() => setEditing(pet)} type="button">编辑</button>
-            <button disabled={config.defaultPetId === pet.id || pet.enabled === false} onClick={() => setDefault(pet)} type="button">设默认</button>
+            <button
+              disabled={config.defaultPetId === pet.id || pet.enabled === false}
+              onClick={() => setDefault(pet)}
+              title={pet.enabled === false ? '需要先启用才能设为默认' : ''}
+              type="button"
+            >
+              设默认
+            </button>
             <button onClick={() => togglePet(pet)} type="button">{pet.enabled === false ? '显示' : '隐藏'}</button>
+            <button className="danger-button" onClick={() => deletePet(pet)} type="button" title="删除宠物">
+              <Trash2 size={14} />
+            </button>
             {isOpenableUrl(pet.videoUrl) && (
               <button onClick={() => openUrl(pet.videoUrl || '')} title="打开视频地址" type="button">
                 <ExternalLink size={14} />
@@ -289,8 +466,7 @@ function PetsView({ config, onChange, saving }: { config: BootstrapConfig; onCha
           saving={saving}
           onCancel={() => setEditing(null)}
           onSave={(pet) => {
-            const next = upsertPet(config, pet)
-            onChange(next)
+            onChange(upsertPet(config, pet))
             setEditing(null)
           }}
         />
@@ -299,35 +475,37 @@ function PetsView({ config, onChange, saving }: { config: BootstrapConfig; onCha
   )
 }
 
-function RoomsView({ config, onChange, saving }: { config: BootstrapConfig; onChange: (config: BootstrapConfig) => void; saving: boolean }) {
+function RoomsView({
+  config,
+  onChange,
+  saving,
+}: {
+  config: BootstrapConfig
+  onChange: (config: BootstrapConfig) => void
+  saving: boolean
+}) {
   const [editing, setEditing] = useState<RoomOption | null>(null)
 
   function toggleRoom(room: RoomOption) {
-    const next = cloneConfig(config)
-    next.rooms = next.rooms.map((item) => (item.id === room.id ? { ...item, enabled: item.enabled === false } : item))
-    const defaultRoom = next.rooms.find((item) => item.id === next.defaultRoomId)
-
-    if (!defaultRoom || defaultRoom.enabled === false) {
-      const fallback = next.rooms.find((item) => item.enabled !== false)
-
-      if (fallback) {
-        next.defaultRoomId = fallback.id
-        next.homeMedia.backgroundVideoUrl = fallback.mediaUrl || next.homeMedia.backgroundVideoUrl
-      }
-    }
-
-    onChange(next)
+    onChange(toggleRoomEnabled(config, room.id))
   }
 
   function setDefault(room: RoomOption) {
     onChange(setDefaultRoom(config, room.id))
   }
 
+  function deleteRoom(room: RoomOption) {
+    if (!window.confirm(`确认从配置中删除「${room.name || room.id}」？\n云存储里的素材不会删除，仅从启动配置移除。`)) return
+    onChange(removeRoom(config, room.id))
+  }
+
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>背景列表</h2>
-        <button className="primary-button" onClick={() => setEditing(emptyRoom())} type="button">新增背景</button>
+        <button className="primary-button" onClick={() => setEditing(emptyRoom())} type="button">
+          新增背景
+        </button>
       </div>
       <DataTable
         columns={['状态', '预览', '名称', '类型', 'ID', '默认', '操作']}
@@ -340,8 +518,18 @@ function RoomsView({ config, onChange, saving }: { config: BootstrapConfig; onCh
           config.defaultRoomId === room.id ? <StarLabel /> : '否',
           <div className="row-actions">
             <button onClick={() => setEditing(room)} type="button">编辑</button>
-            <button disabled={config.defaultRoomId === room.id || room.enabled === false} onClick={() => setDefault(room)} type="button">设默认</button>
+            <button
+              disabled={config.defaultRoomId === room.id || room.enabled === false}
+              onClick={() => setDefault(room)}
+              title={room.enabled === false ? '需要先启用才能设为默认' : ''}
+              type="button"
+            >
+              设默认
+            </button>
             <button onClick={() => toggleRoom(room)} type="button">{room.enabled === false ? '显示' : '隐藏'}</button>
+            <button className="danger-button" onClick={() => deleteRoom(room)} type="button" title="删除背景">
+              <Trash2 size={14} />
+            </button>
             {isOpenableUrl(room.mediaUrl) && (
               <button onClick={() => openUrl(room.mediaUrl)} title="打开媒体地址" type="button">
                 <ExternalLink size={14} />
@@ -357,8 +545,7 @@ function RoomsView({ config, onChange, saving }: { config: BootstrapConfig; onCh
           saving={saving}
           onCancel={() => setEditing(null)}
           onSave={(room) => {
-            const next = upsertRoom(config, room)
-            onChange(next)
+            onChange(upsertRoom(config, room))
             setEditing(null)
           }}
         />
@@ -367,7 +554,15 @@ function RoomsView({ config, onChange, saving }: { config: BootstrapConfig; onCh
   )
 }
 
-function HomeView({ config, onChange, saving }: { config: BootstrapConfig; onChange: (config: BootstrapConfig) => void; saving: boolean }) {
+function HomeView({
+  config,
+  onChange,
+  saving,
+}: {
+  config: BootstrapConfig
+  onChange: (config: BootstrapConfig) => void
+  saving: boolean
+}) {
   const [draft, setDraft] = useState(() => cloneConfig(config))
 
   useEffect(() => {
@@ -382,68 +577,102 @@ function HomeView({ config, onChange, saving }: { config: BootstrapConfig; onCha
   return (
     <form className="panel form-grid" onSubmit={submit}>
       <h2>首页配置</h2>
-      <TextField label="应用名称" value={draft.appName} onChange={(value) => setDraft({ ...draft, appName: value })} />
-      <TextField label="首页提示" value={draft.homeHint} onChange={(value) => setDraft({ ...draft, homeHint: value })} />
+      <TextField
+        label="应用名称"
+        value={draft.appName}
+        onChange={(value) => setDraft({ ...draft, appName: value })}
+      />
+      <TextField
+        label="首页提示"
+        value={draft.homeHint}
+        onChange={(value) => setDraft({ ...draft, homeHint: value })}
+      />
       <SelectField
         label="默认宠物"
         value={draft.defaultPetId}
-        options={draft.pets.filter((pet) => pet.enabled !== false).map((pet) => ({ value: pet.id, label: pet.name }))}
+        options={draft.pets
+          .filter((pet) => pet.enabled !== false)
+          .map((pet) => ({ value: pet.id, label: pet.name }))}
         onChange={(value) => {
-          const next = setDefaultPet(draft, value)
-          setDraft(next)
+          setDraft(setDefaultPet(draft, value))
         }}
       />
       <SelectField
         label="默认背景"
         value={draft.defaultRoomId}
-        options={draft.rooms.filter((room) => room.enabled !== false).map((room) => ({ value: room.id, label: room.name }))}
+        options={draft.rooms
+          .filter((room) => room.enabled !== false)
+          .map((room) => ({ value: room.id, label: room.name }))}
         onChange={(value) => {
-          const next = setDefaultRoom(draft, value)
-          setDraft(next)
+          setDraft(setDefaultRoom(draft, value))
         }}
       />
       <TextField
         label="背景视频 URL"
         value={draft.homeMedia.backgroundVideoUrl}
-        onChange={(value) => setDraft({ ...draft, homeMedia: { ...draft.homeMedia, backgroundVideoUrl: value } })}
+        onChange={(value) =>
+          setDraft({ ...draft, homeMedia: { ...draft.homeMedia, backgroundVideoUrl: value } })
+        }
       />
       <TextField
         label="默认宠物视频 URL"
         value={draft.homeMedia.petVideoUrl}
-        onChange={(value) => setDraft({ ...draft, homeMedia: { ...draft.homeMedia, petVideoUrl: value } })}
+        onChange={(value) =>
+          setDraft({ ...draft, homeMedia: { ...draft.homeMedia, petVideoUrl: value } })
+        }
       />
       <TextField
         label="倾听光球视频"
         value={draft.homeMedia.listenOrbVideoUrl}
-        onChange={(value) => setDraft({ ...draft, homeMedia: { ...draft.homeMedia, listenOrbVideoUrl: value } })}
+        onChange={(value) =>
+          setDraft({ ...draft, homeMedia: { ...draft.homeMedia, listenOrbVideoUrl: value } })
+        }
       />
       <TextField
         label="会员卡标题"
         value={draft.settings.miniAd.title}
-        onChange={(value) => setDraft({ ...draft, settings: { ...draft.settings, miniAd: { ...draft.settings.miniAd, title: value } } })}
+        onChange={(value) =>
+          setDraft({
+            ...draft,
+            settings: { ...draft.settings, miniAd: { ...draft.settings.miniAd, title: value } },
+          })
+        }
       />
       <TextField
         label="会员卡文案"
         value={draft.settings.miniAd.copy}
-        onChange={(value) => setDraft({ ...draft, settings: { ...draft.settings, miniAd: { ...draft.settings.miniAd, copy: value } } })}
+        onChange={(value) =>
+          setDraft({
+            ...draft,
+            settings: { ...draft.settings, miniAd: { ...draft.settings.miniAd, copy: value } },
+          })
+        }
       />
       <label className="check-field">
         <input
           checked={draft.settings.miniAd.enabled}
-          onChange={(event) => setDraft({ ...draft, settings: { ...draft.settings, miniAd: { ...draft.settings.miniAd, enabled: event.target.checked } } })}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              settings: {
+                ...draft.settings,
+                miniAd: { ...draft.settings.miniAd, enabled: event.target.checked },
+              },
+            })
+          }
           type="checkbox"
         />
         展示会员小卡片
       </label>
       <button className="primary-button form-submit" disabled={saving} type="submit">
         {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
-        保存并生效
+        保存到草稿
       </button>
     </form>
   )
 }
 
-function MediaView({ config, onChange }: { config: BootstrapConfig; onChange: (config: BootstrapConfig) => void }) {
+function MediaView({ onState }: { onState: (state: AdminState) => void }) {
   const [petId, setPetId] = useState('')
   const [petName, setPetName] = useState('')
   const [subtitle, setSubtitle] = useState('')
@@ -455,7 +684,6 @@ function MediaView({ config, onChange }: { config: BootstrapConfig; onChange: (c
 
   async function inspectOnly() {
     if (!file) return
-
     const formData = new FormData()
     formData.set('source', file)
     const output = await inspectMutation.mutateAsync(formData)
@@ -465,24 +693,27 @@ function MediaView({ config, onChange }: { config: BootstrapConfig; onChange: (c
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!file) return
+    if (!petId.trim() || !petName.trim()) return
 
     const formData = new FormData()
-    formData.set('petId', petId)
-    formData.set('name', petName)
-    formData.set('subtitle', subtitle)
+    formData.set('petId', petId.trim())
+    formData.set('name', petName.trim())
+    formData.set('subtitle', subtitle.trim())
     formData.set('source', file)
 
     const output = await mediaMutation.mutateAsync(formData)
     setResult(output)
     setInspectResult(output.inspect)
-    onChange(upsertPet(config, output.pet))
+    onState(output.state)
   }
+
+  const canSubmit = Boolean(file) && Boolean(petId.trim()) && Boolean(petName.trim())
 
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>宠物素材自动化</h2>
-        <span className="muted">第一版支持单个 idle WebM</span>
+        <span className="muted">第一版支持单个 idle WebM，处理后写入草稿</span>
       </div>
       <form className="form-grid" onSubmit={submit}>
         <TextField label="宠物 ID" value={petId} onChange={setPetId} placeholder="maolizi" />
@@ -493,11 +724,16 @@ function MediaView({ config, onChange }: { config: BootstrapConfig; onChange: (c
           <input accept="video/webm" onChange={(event) => setFile(event.target.files?.[0] || null)} type="file" />
         </label>
         <div className="button-row">
-          <button className="secondary-button" disabled={inspectMutation.isPending || !file} onClick={inspectOnly} type="button">
+          <button
+            className="secondary-button"
+            disabled={inspectMutation.isPending || !file}
+            onClick={inspectOnly}
+            type="button"
+          >
             {inspectMutation.isPending ? <Loader2 className="spin" size={16} /> : <ListChecks size={16} />}
             仅验收
           </button>
-          <button className="primary-button" disabled={mediaMutation.isPending || !file} type="submit">
+          <button className="primary-button" disabled={mediaMutation.isPending || !canSubmit} type="submit">
             {mediaMutation.isPending ? <Loader2 className="spin" size={16} /> : <CloudUpload size={16} />}
             上传并处理
           </button>
@@ -507,18 +743,191 @@ function MediaView({ config, onChange }: { config: BootstrapConfig; onChange: (c
       {mediaMutation.error && <div className="error-state">{mediaMutation.error.message}</div>}
       {inspectResult && <InspectSummary inspect={inspectResult} />}
       {result && (
-        <div className="result-box">
+        <div className="result-box ok">
           <CheckCircle2 size={18} />
           <div>
-            <strong>{result.pet.name} 已生成并保存</strong>
+            <strong>{result.pet.name} 已处理并写入草稿</strong>
             <span>视频：{result.output.videoUrl}</span>
             <span>预览：{result.output.thumbUrl}</span>
             <span>manifest：{result.manifest.manifestVersion}</span>
+            {result.draftIssues.length > 0 && (
+              <span className="warn-text">草稿仍有 {result.draftIssues.length} 项校验问题，请到「发布中心」查看</span>
+            )}
           </div>
         </div>
       )}
     </section>
   )
+}
+
+function PublishView({
+  state,
+  draft,
+  published,
+  issues,
+  onPublish,
+  onDiscard,
+  onRollback,
+  publishing,
+  discarding,
+  rolling,
+}: {
+  state: AdminState
+  draft: BootstrapConfig | undefined
+  published: BootstrapConfig
+  issues: ValidationIssue[]
+  onPublish: (summary: string) => void
+  onDiscard: () => void
+  onRollback: (versionId: string) => void
+  publishing: boolean
+  discarding: boolean
+  rolling: boolean
+}) {
+  const [summary, setSummary] = useState('')
+  const diffEntries = useMemo(() => diffConfigs(published, draft || null), [published, draft])
+  const autoSummary = useMemo(() => generateDiffSummary(published, draft || null), [published, draft])
+
+  return (
+    <section className="grid">
+      <div className="panel">
+        <div className="panel-head">
+          <h2>发布</h2>
+          <DraftBadge state={state} saving={false} />
+        </div>
+        {!state.hasDraft && (
+          <span className="muted">当前没有草稿。改动配置会自动写入草稿，再回到这里发布。</span>
+        )}
+        {state.hasDraft && !state.hasDraftChanges && (
+          <span className="muted">草稿和当前线上配置一致，无需发布。可以丢弃草稿。</span>
+        )}
+        {state.hasDraftChanges && (
+          <>
+            <DiffList entries={diffEntries} />
+            {autoSummary && (
+              <div className="auto-summary">
+                <strong>变更摘要</strong>
+                <span>{autoSummary}</span>
+              </div>
+            )}
+            {issues.length > 0 && (
+              <div className="issue-list">
+                {issues.map((issue) => (
+                  <div key={`${issue.field}-${issue.message}`}>{issue.message}</div>
+                ))}
+              </div>
+            )}
+            <label className="field">
+              <span>发布说明</span>
+              <input
+                placeholder="例如：上线毛栗子的 idle 素材"
+                value={summary}
+                onChange={(event) => setSummary(event.target.value)}
+              />
+            </label>
+            <div className="button-row">
+              <button
+                className="primary-button"
+                disabled={publishing || issues.length > 0}
+                onClick={() => {
+                  const parts = [autoSummary, summary.trim()].filter(Boolean)
+                  onPublish(parts.join(' · '))
+                }}
+                type="button"
+              >
+                {publishing ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
+                发布到线上
+              </button>
+              <button
+                className="secondary-button"
+                disabled={discarding}
+                onClick={() => {
+                  if (window.confirm('确认丢弃草稿？所有未发布改动将被舍弃。')) onDiscard()
+                }}
+                type="button"
+              >
+                {discarding ? <Loader2 className="spin" size={16} /> : <Undo2 size={16} />}
+                丢弃草稿
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>历史版本</h2>
+          <span className="muted">最近 20 条</span>
+        </div>
+        {state.versions.length === 0 ? (
+          <span className="muted">还没有发布过</span>
+        ) : (
+          <div className="audit-list">
+            {state.versions.map((version) => (
+              <div className="audit-item" key={version.version}>
+                <strong>{version.summary || version.version}</strong>
+                <span>{version.version}{version.rollbackOf ? ` · 回滚自 ${version.rollbackOf}` : ''}</span>
+                <small>{formatTime(version.publishedAt)} / {version.publishedBy || 'admin'}</small>
+                <div className="row-actions">
+                  <button
+                    disabled={rolling || version.version === published.configVersion}
+                    onClick={() => {
+                      if (window.confirm(`确认回滚到 ${version.version}？将创建新版本并替换当前线上。`)) {
+                        onRollback(version.version)
+                      }
+                    }}
+                    type="button"
+                  >
+                    <RotateCcw size={14} /> 回滚
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>操作日志</h2>
+        <AuditList logs={state.auditLogs} />
+      </div>
+    </section>
+  )
+}
+
+function DiffList({ entries }: { entries: ReturnType<typeof diffConfigs> }) {
+  if (entries.length === 0) {
+    return <span className="muted">没有结构化差异（可能只是 configVersion 变化）</span>
+  }
+
+  return (
+    <div className="diff-list">
+      <span className="muted">共 {entries.length} 处差异</span>
+      {entries.slice(0, 50).map((entry) => (
+        <div className="diff-row" key={entry.path}>
+          <code className="code-text">{entry.path}</code>
+          <div className="diff-values">
+            <span className="diff-before">{formatDiffValue(entry.before)}</span>
+            <span>→</span>
+            <span className="diff-after">{formatDiffValue(entry.after)}</span>
+          </div>
+        </div>
+      ))}
+      {entries.length > 50 && <span className="muted">仅显示前 50 处差异</span>}
+    </div>
+  )
+}
+
+function formatDiffValue(value: unknown): string {
+  if (value === undefined) return '∅'
+  if (value === null) return 'null'
+  if (typeof value === 'string') return `"${value}"`
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    const text = JSON.stringify(value)
+    return text.length > 80 ? `${text.slice(0, 77)}…` : text
+  } catch {
+    return String(value)
+  }
 }
 
 function PetEditor({
@@ -537,30 +946,92 @@ function PetEditor({
   const [draft, setDraft] = useState<PetOption>({ ...pet })
   const isExisting = config.pets.some((item) => item.id === pet.id)
 
+  const localIssues = useMemo(() => {
+    const errors: string[] = []
+    if (!draft.id.trim()) errors.push('ID 不能为空')
+    if (!draft.name.trim()) errors.push('名称不能为空')
+    if (!isExisting && config.pets.some((item) => item.id === draft.id.trim())) {
+      errors.push(`ID ${draft.id.trim()} 已存在`)
+    }
+    return errors
+  }, [draft, config, isExisting])
+
   return (
-    <EditorShell title="编辑宠物" onCancel={onCancel}>
-      <TextField disabled={isExisting} label="ID" value={draft.id} onChange={(value) => setDraft({ ...draft, id: normalizeIdInput(value) })} />
+    <EditorShell title={isExisting ? '编辑宠物' : '新增宠物'} onCancel={onCancel}>
+      <TextField
+        disabled={isExisting}
+        label="ID"
+        value={draft.id}
+        onChange={(value) => setDraft({ ...draft, id: normalizeIdInput(value) })}
+      />
       <TextField label="名称" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
       <TextField label="副标题" value={draft.subtitle} onChange={(value) => setDraft({ ...draft, subtitle: value })} />
-      <NumberField label="排序" value={draft.frameOffset || 0} onChange={(value) => setDraft({ ...draft, frameOffset: value })} />
-      <TextField label="manifestKey" value={draft.manifestKey || ''} onChange={(value) => setDraft({ ...draft, manifestKey: value })} />
-      <TextField label="视频 URL" value={draft.videoUrl || ''} onChange={(value) => setDraft({ ...draft, videoUrl: value })} />
-      <TextField label="预览图 URL" value={draft.thumbUrl || ''} onChange={(value) => setDraft({ ...draft, thumbUrl: value })} />
-      <TextField label="倾听图 URL" value={draft.listenFrameUrl || ''} onChange={(value) => setDraft({ ...draft, listenFrameUrl: value })} />
+      <NumberField
+        label="排序"
+        value={draft.frameOffset || 0}
+        onChange={(value) => setDraft({ ...draft, frameOffset: value })}
+      />
+      <TextField
+        label="manifestKey"
+        value={draft.manifestKey || ''}
+        onChange={(value) => setDraft({ ...draft, manifestKey: value })}
+      />
+      <TextField
+        label="视频 URL"
+        value={draft.videoUrl || ''}
+        onChange={(value) => setDraft({ ...draft, videoUrl: value })}
+      />
+      <TextField
+        label="预览图 URL"
+        value={draft.thumbUrl || ''}
+        onChange={(value) => setDraft({ ...draft, thumbUrl: value })}
+      />
+      <TextField
+        label="倾听图 URL"
+        value={draft.listenFrameUrl || ''}
+        onChange={(value) => setDraft({ ...draft, listenFrameUrl: value })}
+      />
+      <TextField
+        label="音频 URL"
+        value={draft.audioUrl || ''}
+        onChange={(value) => setDraft({ ...draft, audioUrl: value })}
+      />
+      {draft.audioUrl && (
+        <CloudLink fileID={draft.audioUrl} label="试听音频" />
+      )}
       <label className="check-field">
-        <input checked={draft.enabled !== false} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} type="checkbox" />
+        <input
+          checked={draft.enabled !== false}
+          onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
+          type="checkbox"
+        />
         展示
       </label>
+      {localIssues.length > 0 && (
+        <div className="issue-list">
+          {localIssues.map((message) => (
+            <div key={message}>{message}</div>
+          ))}
+        </div>
+      )}
       <button
         className="primary-button form-submit"
-        disabled={saving}
-        onClick={() => onSave({ ...draft, manifestKey: draft.manifestKey || `${draft.id}/manifest.json` })}
+        disabled={saving || localIssues.length > 0}
+        onClick={() =>
+          onSave({
+            ...draft,
+            id: draft.id.trim(),
+            manifestKey: draft.manifestKey || `${draft.id.trim()}/manifest.json`,
+          })
+        }
         type="button"
       >
         {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
-        保存
+        保存到草稿
       </button>
-      <span className="muted">当前默认宠物：{config.pets.find((item) => item.id === config.defaultPetId)?.name}</span>
+      <span className="muted">
+        当前默认宠物：{config.pets.find((item) => item.id === config.defaultPetId)?.name || '-'}
+      </span>
     </EditorShell>
   )
 }
@@ -586,10 +1057,11 @@ function RoomEditor({
 
   async function createRoom() {
     if (!file) return
+    if (!draft.name.trim()) return
 
     const formData = new FormData()
-    formData.set('name', draft.name)
-    formData.set('subtitle', draft.subtitle)
+    formData.set('name', draft.name.trim())
+    formData.set('subtitle', draft.subtitle.trim())
     formData.set('source', file)
 
     const output = await roomMediaMutation.mutateAsync(formData)
@@ -600,7 +1072,11 @@ function RoomEditor({
   return (
     <EditorShell title={isExisting ? '编辑背景' : '新增背景'} onCancel={onCancel}>
       <TextField label="名称" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
-      <TextField label="副标题" value={draft.subtitle} onChange={(value) => setDraft({ ...draft, subtitle: value })} />
+      <TextField
+        label="副标题"
+        value={draft.subtitle}
+        onChange={(value) => setDraft({ ...draft, subtitle: value })}
+      />
       {isExisting ? (
         <>
           <ReadOnlyField label="ID" value={draft.id} />
@@ -631,21 +1107,41 @@ function RoomEditor({
         </>
       )}
       <label className="check-field">
-        <input checked={draft.enabled !== false} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} type="checkbox" />
+        <input
+          checked={draft.enabled !== false}
+          onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
+          type="checkbox"
+        />
         展示
       </label>
       {isExisting ? (
-        <button className="primary-button form-submit" disabled={saving} onClick={() => onSave(draft)} type="button">
+        <button
+          className="primary-button form-submit"
+          disabled={saving || !draft.name.trim()}
+          onClick={() => onSave(draft)}
+          type="button"
+        >
           {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
-          保存
+          保存到草稿
         </button>
       ) : (
-        <button className="primary-button form-submit" disabled={roomMediaMutation.isPending || saving || !file || !draft.name.trim()} onClick={createRoom} type="button">
-          {roomMediaMutation.isPending || saving ? <Loader2 className="spin" size={16} /> : <CloudUpload size={16} />}
-          上传并保存
+        <button
+          className="primary-button form-submit"
+          disabled={roomMediaMutation.isPending || saving || !file || !draft.name.trim()}
+          onClick={createRoom}
+          type="button"
+        >
+          {roomMediaMutation.isPending || saving ? (
+            <Loader2 className="spin" size={16} />
+          ) : (
+            <CloudUpload size={16} />
+          )}
+          上传并写入草稿
         </button>
       )}
-      <span className="muted">当前默认背景：{config.rooms.find((item) => item.id === config.defaultRoomId)?.name}</span>
+      <span className="muted">
+        当前默认背景：{config.rooms.find((item) => item.id === config.defaultRoomId)?.name || '-'}
+      </span>
     </EditorShell>
   )
 }
@@ -655,9 +1151,12 @@ function InspectSummary({ inspect }: { inspect: MediaInspectResult }) {
     <div className={`inspect-box ${inspect.ok ? 'ok' : 'warn'}`}>
       <strong>{inspect.ok ? '素材验收通过' : '素材未通过验收'}</strong>
       <span>
-        {inspect.source.codec} / {inspect.source.width}x{inspect.source.height} / {inspect.source.fps.toFixed(2)}fps / {inspect.source.duration.toFixed(2)}s
+        {inspect.source.codec} / {inspect.source.width}x{inspect.source.height} /{' '}
+        {inspect.source.fps.toFixed(2)}fps / {inspect.source.duration.toFixed(2)}s
       </span>
-      <span>alpha：YMIN {inspect.source.alphaYMin ?? '-'} / YMAX {inspect.source.alphaYMax ?? '-'}</span>
+      <span>
+        alpha：YMIN {inspect.source.alphaYMin ?? '-'} / YMAX {inspect.source.alphaYMax ?? '-'}
+      </span>
       {inspect.warnings.map((warning) => (
         <span key={warning}>{warning}</span>
       ))}
@@ -675,15 +1174,27 @@ function AuditList({ logs }: { logs: AdminAuditLog[] }) {
       {logs.map((log) => (
         <div className="audit-item" key={log.id}>
           <strong>{log.summary || log.action}</strong>
-          <span>{log.action} / {log.target}</span>
-          <small>{formatTime(log.createdAt)} / {log.actor || 'admin'}</small>
+          <span>
+            {log.action} / {log.target}
+          </span>
+          <small>
+            {formatTime(log.createdAt)} / {log.actor || 'admin'}
+          </small>
         </div>
       ))}
     </div>
   )
 }
 
-function EditorShell({ title, children, onCancel }: { title: string; children: React.ReactNode; onCancel: () => void }) {
+function EditorShell({
+  title,
+  children,
+  onCancel,
+}: {
+  title: string
+  children: React.ReactNode
+  onCancel: () => void
+}) {
   return (
     <div className="drawer">
       <div className="drawer-card">
@@ -697,17 +1208,29 @@ function EditorShell({ title, children, onCancel }: { title: string; children: R
   )
 }
 
-function DataTable({ columns, rows }: { columns: string[]; rows: Array<Array<React.ReactNode>> }) {
+function DataTable({
+  columns,
+  rows,
+}: {
+  columns: string[]
+  rows: Array<Array<React.ReactNode>>
+}) {
   return (
     <div className="table-wrap">
       <table>
         <thead>
-          <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
+          </tr>
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
             <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -717,7 +1240,11 @@ function DataTable({ columns, rows }: { columns: string[]; rows: Array<Array<Rea
 }
 
 function StatusPill({ enabled }: { enabled: boolean }) {
-  return <span className={`status-pill ${enabled ? 'enabled' : 'disabled'}`}>{enabled ? '展示' : '隐藏'}</span>
+  return (
+    <span className={`status-pill ${enabled ? 'enabled' : 'disabled'}`}>
+      {enabled ? '展示' : '隐藏'}
+    </span>
+  )
 }
 
 function StarLabel() {
@@ -788,7 +1315,11 @@ function NumberField({
   return (
     <label className="field">
       <span>{label}</span>
-      <input type="number" value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(Number(event.target.value))} />
+      <input
+        type="number"
+        value={value}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(Number(event.target.value))}
+      />
     </label>
   )
 }
@@ -809,7 +1340,9 @@ function SelectField({
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
         ))}
       </select>
     </label>
@@ -826,10 +1359,7 @@ function isOpenableUrl(url?: string) {
 }
 
 function normalizeIdInput(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '')
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
 }
 
 function formatTime(value: string): string {
@@ -845,4 +1375,35 @@ function formatTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function CloudLink({ fileID, label }: { fileID: string; label: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function resolve() {
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { resolveCloudUrl } = await import('./api')
+      const result = await resolveCloudUrl(fileID)
+      setUrl(result.url)
+      window.open(result.url, '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      console.warn('resolve cloud url failed:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <button className="secondary-button" disabled={loading} onClick={resolve} type="button">
+      {loading ? <Loader2 className="spin" size={14} /> : <ExternalLink size={14} />}
+      {label}
+    </button>
+  )
 }

@@ -9,6 +9,7 @@ export interface PetOption {
   videoUrl?: string
   thumbUrl?: string
   listenFrameUrl?: string
+  audioUrl?: string
   enabled?: boolean
 }
 
