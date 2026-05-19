@@ -7,7 +7,7 @@ import {
   SettingItem,
   normalizeBootstrapConfig,
 } from '../../config/bootstrap'
-import { PetManifest, normalizePetManifest } from '../../config/petManifest'
+import { normalizePetManifest } from '../../config/petManifest'
 
 type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinking' | 'success' | 'error'
 
@@ -39,6 +39,15 @@ interface PageData {
   voiceHint: string
   transcribedText: string
   petReply: string
+  orbPressed: boolean
+  drawerOpen: boolean
+  statEnergy: number
+  statBoredom: number
+  statAffection: number
+  relationshipIcon: string
+  relationshipText: string
+  moodIcon: string
+  moodText: string
   activePetIndex: number
   activeRoomIndex: number
 }
@@ -248,7 +257,6 @@ let petVideoSourceCache: Record<string, string> = {}
 let petVideoStartingUrl = ''
 let petVideoActiveUrl = ''
 let petVideoNextDecoder: PetVideoDecoder | null = null
-let petVideoNextSource = ''
 let petVideoNextReady = false
 let petVideoFrameIndex = 0
 const PET_VIDEO_TRIM_FRAMES = 5
@@ -279,7 +287,7 @@ let asrRealtimeError = ''
 let asrFallbackToUpload = false
 
 const MIN_RECORD_MS = 600
-const MAX_RECORD_MS = 15000
+const MAX_RECORD_MS = 60000
 const RECORD_FORMAT: 'mp3' = 'mp3'
 const RECORDER_STOP_FALLBACK_MS = 1800
 const REALTIME_FRAME_SIZE_KB = 4
@@ -440,6 +448,15 @@ Component({
     voiceHint: '按住和小团子说话',
     transcribedText: '',
     petReply: '',
+    orbPressed: false,
+    drawerOpen: false,
+    statEnergy: 80,
+    statBoredom: 20,
+    statAffection: 50,
+    relationshipIcon: '🔥',
+    relationshipText: '连续1天',
+    moodIcon: '😊',
+    moodText: '开心',
     activePetIndex: 0,
     activeRoomIndex: Math.max(0, FALLBACK_BOOTSTRAP_CONFIG.rooms.findIndex((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId)),
   } as PageData,
@@ -722,7 +739,6 @@ Component({
           petVideoActiveUrl = item.videoUrl
           petVideoFrameIndex = 0
           petVideoNextDecoder = null
-          petVideoNextSource = ''
           petVideoNextReady = false
           this.renderAlphaVideoFrame()
         } else {
@@ -736,7 +752,6 @@ Component({
           petVideoActiveUrl = item.videoUrl
           petVideoFrameIndex = 0
           petVideoNextDecoder = null
-          petVideoNextSource = ''
           petVideoNextReady = false
           this.setupDecoderEvents(decoder, item.videoUrl)
           decoder.start({ source, mode: 0 })
@@ -772,15 +787,13 @@ Component({
         this.setupDecoderEvents(decoder, nextItem.videoUrl)
         decoder.start({ source, mode: 0 })
         petVideoNextDecoder = decoder
-        petVideoNextSource = source
       } catch (error) {
         petVideoNextDecoder = null
-        petVideoNextSource = ''
         petVideoNextReady = false
       }
     },
 
-    setupDecoderEvents(decoder: PetVideoDecoder, url: string) {
+    setupDecoderEvents(decoder: PetVideoDecoder, _url: string) {
       decoder.on('start', () => {
         if (petVideoDecoder === decoder) {
           petVideoFrameIndex = 0
@@ -835,7 +848,6 @@ Component({
           petVideoNextDecoder.remove()
         } catch {}
         petVideoNextDecoder = null
-        petVideoNextSource = ''
         petVideoNextReady = false
       }
     },
@@ -1282,6 +1294,10 @@ Component({
       this.leaveHomePage('settings')
     },
 
+    toggleDrawer() {
+      this.setData({ drawerOpen: !this.data.drawerOpen })
+    },
+
     backHome() {
       this.enterHomePage()
     },
@@ -1334,22 +1350,26 @@ Component({
       if (this.data.pageName !== 'home') return
       if (this.data.voiceStatus === 'uploading' || this.data.voiceStatus === 'transcribing' || this.data.voiceStatus === 'thinking') return
 
+      this.setData({ orbPressed: true })
+
       if (!recorder) {
         this.initRecorder()
       }
 
       try {
-        const realtimeReady = await this.prepareRealtimeAsr()
         recordingStopping = false
-        asrFallbackToUpload = !realtimeReady
+        asrFallbackToUpload = true
         recorder!.start({
           duration: MAX_RECORD_MS,
           sampleRate: 16000,
           numberOfChannels: 1,
           encodeBitRate: 48000,
           format: RECORD_FORMAT,
-          frameSize: realtimeReady ? REALTIME_FRAME_SIZE_KB : undefined,
+          frameSize: REALTIME_FRAME_SIZE_KB,
         })
+
+        const realtimeReady = await this.prepareRealtimeAsr()
+        asrFallbackToUpload = !realtimeReady
       } catch (error) {
         console.warn('[index] start recorder failed:', error)
         this.closeRealtimeAsr()
@@ -1358,6 +1378,7 @@ Component({
     },
 
     handleListenTouchEnd() {
+      this.setData({ orbPressed: false })
       if (!recorder || this.data.voiceStatus !== 'recording' || recordingStopping) return
 
       recordingStopping = true
@@ -1380,6 +1401,7 @@ Component({
 
     async handleRecordStop(result: WechatMiniprogram.OnStopCallbackResult) {
       recordingStopping = false
+      this.setData({ orbPressed: false })
       const duration = result.duration || Date.now() - recordingStartedAt
 
       if (!asrFallbackToUpload) {

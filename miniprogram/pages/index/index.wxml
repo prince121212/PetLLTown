@@ -22,7 +22,32 @@
           <text class="subtitle">{{homeHint}}</text>
         </view>
       </view>
-      <button class="tiny-btn settings-entry" style="{{homeTopStyle}}" aria-label="打开设置" bindtap="openSettings">⚙</button>
+
+      <view class="status-drawer {{drawerOpen ? 'open' : 'closed'}}">
+        <view class="drawer-content">
+          <button class="drawer-settings-btn" bindtap="openSettings">⚙ 设置</button>
+          <view class="drawer-stats">
+            <view class="drawer-stat-row">
+              <text class="drawer-stat-icon">⚡</text>
+              <view class="drawer-stat-bar"><view class="drawer-stat-fill energy" style="width:{{statEnergy}}%"></view></view>
+            </view>
+            <view class="drawer-stat-row">
+              <text class="drawer-stat-icon">💭</text>
+              <view class="drawer-stat-bar"><view class="drawer-stat-fill boredom" style="width:{{statBoredom}}%"></view></view>
+            </view>
+            <view class="drawer-stat-row">
+              <text class="drawer-stat-icon">💛</text>
+              <view class="drawer-stat-bar"><view class="drawer-stat-fill affection" style="width:{{statAffection}}%"></view></view>
+            </view>
+          </view>
+          <view class="drawer-relationship">
+            <text class="drawer-flame">{{relationshipIcon}}</text>
+            <text class="drawer-streak">{{relationshipText}}</text>
+          </view>
+          <text class="drawer-mood">{{moodIcon}} {{moodText}}</text>
+        </view>
+        <view class="drawer-tab" bindtap="toggleDrawer">{{drawerOpen ? '‹' : '›'}}</view>
+      </view>
 
       <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
         <view wx:if="{{!configReady}}" class="pet-loading">
@@ -36,7 +61,7 @@
         <text wx:if="{{transcribedText}}" class="voice-text">{{transcribedText}}</text>
         <text wx:if="{{petReply}}" class="pet-reply">{{petReply}}</text>
         <view
-          class="listen-orb {{voiceStatus}}"
+          class="listen-orb {{voiceStatus}} {{orbPressed ? 'pressed' : ''}}"
           bindtouchstart="handleListenTouchStart"
           bindtouchend="handleListenTouchEnd"
           bindtouchcancel="handleListenTouchEnd"
