@@ -46,6 +46,148 @@ server.get('/api/health', (_request, response) => {
   response.json({ ok: true, data: { envId, serverTime: new Date().toISOString() } })
 })
 
+server.patch('/api/media/pets/:petId/actions/:actionId/videos', async (request, response) => {
+  await handle(response, async () => {
+    const petId = normalizeId(request.params.petId)
+    const actionId = normalizeId(request.params.actionId)
+    const videoUrl = String(request.body && request.body.videoUrl ? request.body.videoUrl : '').trim()
+
+    if (!petId || !actionId || !videoUrl) {
+      const error = new Error('petId, actionId, videoUrl 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    const petDoc = await getDocument('pets', petId)
+    if (!petDoc || !petDoc.manifest) {
+      const error = new Error(`未找到宠物 ${petId} 的 manifest`)
+      error.statusCode = 404
+      throw error
+    }
+
+    const manifest = petDoc.manifest
+    const actionIndex = Array.isArray(manifest.actions)
+      ? manifest.actions.findIndex((a) => a.id === actionId)
+      : -1
+
+    const ACTION_LABELS = { idle: '待机', listening: '倾听', reply: '回应', 'sleep-enter': '入睡过渡', 'sleep-loop': '睡眠循环', 'sleep-exit': '唤醒过渡' }
+
+    if (actionIndex < 0) {
+      manifest.actions = manifest.actions || []
+      manifest.actions.push({
+        id: actionId,
+        type: 'loop',
+        label: ACTION_LABELS[actionId] || actionId,
+        fps: 24,
+        next: ['idle'],
+        videoUrls: [videoUrl],
+      })
+    } else {
+      const action = manifest.actions[actionIndex]
+      const urls = Array.isArray(action.videoUrls) ? action.videoUrls : []
+      if (!urls.includes(videoUrl)) urls.push(videoUrl)
+      action.videoUrls = urls
+    }
+
+    const { _id, ...petDocRest } = petDoc
+    await setDocument('pets', petId, {
+      ...petDocRest,
+      manifest,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'admin-patch',
+    })
+
+    await writeAuditLog({
+      action: 'patchActionVideo',
+      target: `${petId}/${actionId}`,
+      summary: `手动补录视频到 ${petId}/${actionId}`,
+      source: 'admin-server',
+    })
+
+    const updatedAction = manifest.actions.find((a) => a.id === actionId)
+    return {
+      petId,
+      actionId,
+      videoUrls: updatedAction ? updatedAction.videoUrls : [videoUrl],
+    }
+  })
+})
+
+server.delete('/api/media/pets/:petId/actions/:actionId/videos', async (request, response) => {
+  await handle(response, async () => {
+    const petId = normalizeId(request.params.petId)
+    const actionId = normalizeId(request.params.actionId)
+    const videoUrl = String(request.body && request.body.videoUrl ? request.body.videoUrl : '').trim()
+
+    if (!petId || !actionId || !videoUrl) {
+      const error = new Error('petId, actionId, videoUrl 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    const petDoc = await getDocument('pets', petId)
+    if (!petDoc || !petDoc.manifest) {
+      const error = new Error(`未找到宠物 ${petId} 的 manifest`)
+      error.statusCode = 404
+      throw error
+    }
+
+    const manifest = petDoc.manifest
+    const action = Array.isArray(manifest.actions)
+      ? manifest.actions.find((a) => a.id === actionId)
+      : null
+
+    if (!action || !Array.isArray(action.videoUrls)) {
+      const error = new Error(`未找到场景 ${actionId}`)
+      error.statusCode = 404
+      throw error
+    }
+
+    if (action.videoUrls.length <= 1) {
+      const error = new Error('该场景只剩一个视频，不能删除')
+      error.statusCode = 400
+      throw error
+    }
+
+    const videoIndex = action.videoUrls.indexOf(videoUrl)
+    if (videoIndex < 0) {
+      const error = new Error('该视频不在场景列表中')
+      error.statusCode = 404
+      throw error
+    }
+
+    action.videoUrls.splice(videoIndex, 1)
+
+    if (action.audioUrl) {
+      action.audioUrl = ''
+    }
+
+    const { _id, ...petDocRest } = petDoc
+    await setDocument('pets', petId, {
+      ...petDocRest,
+      manifest,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'admin-media',
+    })
+
+    const videoKey = videoUrl.replace(/^cloud:\/\/[^/]+\//, '')
+    await cos.deleteObject({ Bucket: cosBucket, Region: cosRegion, Key: videoKey }, () => undefined)
+
+    await writeAuditLog({
+      action: 'deleteActionVideo',
+      target: `${petId}/${actionId}`,
+      summary: `删除 ${petId}/${actionId} 的视频 ${videoUrl.split('/').pop()}`,
+      source: request.ip || 'admin-server',
+    })
+
+    return {
+      petId,
+      actionId,
+      videoUrls: action.videoUrls,
+    }
+  })
+})
+
 server.get('/api/state', async (_request, response) => {
   await handle(response, async () => getAdminState())
 })
@@ -188,6 +330,62 @@ server.post('/api/resolve-url', async (request, response) => {
     })
 
     return { url: result.Url }
+  })
+})
+
+server.get('/api/media/pets/:petId/manifest', async (request, response) => {
+  await handle(response, async () => {
+    const petId = normalizeId(request.params.petId)
+
+    if (!petId) {
+      const error = new Error('宠物 ID 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    const petDoc = await getDocument('pets', petId)
+
+    if (!petDoc || !petDoc.manifest) {
+      const error = new Error(`未找到宠物 ${petId} 的 manifest`)
+      error.statusCode = 404
+      throw error
+    }
+
+    const manifest = petDoc.manifest
+    const draftConfig = await getDraftBase()
+    const petInConfig = draftConfig.pets.find((p) => p.id === petId)
+    const legacyVideoUrl = petInConfig && petInConfig.videoUrl ? petInConfig.videoUrl : ''
+
+    const STANDARD_ACTIONS = [
+      { id: 'idle', label: '待机' },
+      { id: 'listening', label: '倾听' },
+      { id: 'reply', label: '回应' },
+      { id: 'sleep-enter', label: '入睡过渡' },
+      { id: 'sleep-loop', label: '睡眠循环' },
+      { id: 'sleep-exit', label: '唤醒过渡' },
+    ]
+
+    const dbActions = Array.isArray(manifest.actions) ? manifest.actions : []
+
+    const actions = STANDARD_ACTIONS.map((std) => {
+      const found = dbActions.find((a) => a.id === std.id)
+      let videoUrls = found && Array.isArray(found.videoUrls) ? found.videoUrls : []
+      if (!videoUrls.length && std.id === 'idle' && legacyVideoUrl) {
+        videoUrls = [legacyVideoUrl]
+      }
+      return {
+        id: std.id,
+        label: std.label,
+        videoUrls,
+        audioUrl: found && found.audioUrl ? found.audioUrl : '',
+      }
+    })
+
+    return {
+      petId,
+      name: manifest.name || petDoc.name || petId,
+      actions,
+    }
   })
 })
 
@@ -360,6 +558,45 @@ server.post('/api/media/pets/create-from-webm', upload.single('source'), async (
   })
 })
 
+server.post('/api/media/pets/add-action-video', upload.single('source'), async (request, response) => {
+  await handle(response, async () => {
+    const sourceFile = request.file
+
+    if (!sourceFile) {
+      const error = new Error('请上传 WebM 源素材')
+      error.statusCode = 400
+      throw error
+    }
+
+    const petId = normalizeId(request.body.petId)
+    const actionId = normalizeId(request.body.actionId)
+
+    if (!petId || !actionId) {
+      const error = new Error('宠物 ID 和场景 ID 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    try {
+      const result = await addActionVideoToPet({ sourcePath: sourceFile.path, originalName: sourceFile.originalname, petId, actionId })
+
+      await writeAuditLog({
+        action: 'addActionVideo',
+        target: `${petId}/${actionId}`,
+        summary: `为 ${petId} 添加 ${actionId} 场景视频 #${result.sequence}`,
+        source: request.ip || 'admin-server',
+      })
+
+      return {
+        ...result,
+        state: await getAdminState(),
+      }
+    } finally {
+      await fsp.rm(sourceFile.path, { force: true }).catch(() => undefined)
+    }
+  })
+})
+
 server.post('/api/media/rooms/create-from-media', upload.single('source'), async (request, response) => {
   await handle(response, async () => {
     const sourceFile = request.file
@@ -507,7 +744,7 @@ async function createPetFromWebm({ sourcePath, originalName, petId, name, subtit
     const listenFrameUrl = cloudUrl(listenKey)
     const thumbUrl = cloudUrl(thumbKey)
     const audioUrl = hasAudio ? cloudUrl(audioKey) : ''
-    const manifest = buildPetManifest({ petId, name, frameCount: frameCount || Math.round(inspect.source.duration * 24), audioUrl })
+    const manifest = buildPetManifest({ petId, name, audioUrl })
     const pet = {
       id: petId,
       name,
@@ -541,8 +778,135 @@ async function createPetFromWebm({ sourcePath, originalName, petId, name, subtit
         videoUrl,
         thumbUrl,
         listenFrameUrl,
-        frameCount: manifest.actions[0].frameCount,
       },
+    }
+  } finally {
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+async function addActionVideoToPet({ sourcePath, originalName, petId, actionId }) {
+  await fsp.mkdir(tmpRoot, { recursive: true })
+
+  const workDir = path.join(tmpRoot, `${petId}-${actionId}-${Date.now()}`)
+  await fsp.mkdir(workDir, { recursive: true })
+
+  try {
+    const petDoc = await getDocument('pets', petId)
+    const manifest = petDoc && petDoc.manifest ? petDoc.manifest : null
+    const existingAction = manifest && Array.isArray(manifest.actions)
+      ? manifest.actions.find((a) => a.id === actionId)
+      : null
+    const existingVideos = existingAction && Array.isArray(existingAction.videoUrls)
+      ? existingAction.videoUrls
+      : []
+    const sequence = existingVideos.length + 1
+    const seqStr = String(sequence).padStart(3, '0')
+
+    const probe = await ffprobe(sourcePath)
+    const alphaCheck = path.join(workDir, 'source-alpha-check.png')
+    const inspect = await inspectWebm({ sourcePath, originalName, probe, alphaCheck })
+
+    if (!inspect.ok) {
+      const error = new Error('素材没有通过 alpha 验收')
+      error.statusCode = 400
+      throw error
+    }
+
+    const outputVideo = path.join(workDir, `${petId}-${actionId}-alpha-pack-h-${seqStr}.mp4`)
+    await transcodeAlphaPack(sourcePath, outputVideo)
+
+    const packedAlphaCheck = path.join(workDir, 'packed-alpha-half-check.png')
+    const packedAlphaStats = await inspectPackedAlpha(outputVideo, packedAlphaCheck)
+
+    if (packedAlphaStats.yMin > 5 || packedAlphaStats.yMax < 250) {
+      const error = new Error('双通道 MP4 的右半 alpha mask 不合格')
+      error.statusCode = 400
+      throw error
+    }
+
+    const videoKey = `pets/${petId}/actions/${actionId}/videos/${petId}-${actionId}-alpha-pack-h-${seqStr}.mp4`
+    await uploadToCos(outputVideo, videoKey, 'video/mp4')
+    const videoUrl = cloudUrl(videoKey)
+
+    const audioFile = path.join(workDir, `${petId}-${actionId}-${seqStr}.aac`)
+    const hasAudio = await extractAudio(sourcePath, audioFile)
+    let audioUrl = ''
+    if (hasAudio) {
+      const audioKey = `pets/${petId}/actions/${actionId}/audio/${petId}-${actionId}-${seqStr}.aac`
+      await uploadToCos(audioFile, audioKey, 'audio/aac')
+      audioUrl = cloudUrl(audioKey)
+    }
+
+    const isFirstVideo = existingVideos.length === 0
+    if (isFirstVideo) {
+      const frameDir = path.join(workDir, 'frames')
+      await fsp.mkdir(frameDir, { recursive: true })
+
+      const outputProbe = await ffprobe(outputVideo)
+      const outputVideoStream = outputProbe.streams.find((s) => s.codec_type === 'video') || {}
+      const frameCount = Number(outputVideoStream.nb_frames || 0)
+      const safeFrameCount = Math.max(1, frameCount || Math.round(inspect.source.duration * 24) || 1)
+      const listenFrameIndex = Math.min(30, safeFrameCount - 1)
+      const thumbFrameIndex = Math.min(90, safeFrameCount - 1)
+
+      const listenFrame = path.join(frameDir, 'frame_0030.png')
+      const thumbFrame = path.join(frameDir, 'frame_0090.png')
+      await extractFrame(sourcePath, listenFrameIndex, listenFrame)
+      await extractFrame(sourcePath, thumbFrameIndex, thumbFrame)
+
+      const listenKey = `pets/${petId}/actions/${actionId}/frames/frame_0030.png`
+      const thumbKey = `pets/${petId}/actions/${actionId}/frames/frame_0090.png`
+      await uploadToCos(listenFrame, listenKey, 'image/png')
+      await uploadToCos(thumbFrame, thumbKey, 'image/png')
+
+      if (actionId === 'idle') {
+        const draftConfig = await getDraftBase()
+        const petInConfig = draftConfig.pets.find((p) => p.id === petId)
+        if (petInConfig) {
+          petInConfig.videoUrl = videoUrl
+          petInConfig.thumbUrl = cloudUrl(thumbKey)
+          petInConfig.listenFrameUrl = cloudUrl(listenKey)
+          await writeDraftConfig(draftConfig)
+        }
+      }
+    }
+
+    const updatedVideoUrls = [...existingVideos, videoUrl]
+    if (manifest && Array.isArray(manifest.actions)) {
+      const actionIndex = manifest.actions.findIndex((a) => a.id === actionId)
+      if (actionIndex >= 0) {
+        manifest.actions[actionIndex].videoUrls = updatedVideoUrls
+        if (audioUrl && !manifest.actions[actionIndex].audioUrl) {
+          manifest.actions[actionIndex].audioUrl = audioUrl
+        }
+      } else {
+        const actionLabels = { idle: '待机', listening: '倾听', reply: '回应', 'sleep-enter': '入睡过渡', 'sleep-loop': '睡眠循环', 'sleep-exit': '唤醒过渡' }
+        manifest.actions.push({
+          id: actionId,
+          type: actionId === 'respond' ? 'transition' : 'loop',
+          label: actionLabels[actionId] || actionId,
+          fps: 24,
+          next: ['idle'],
+          videoUrls: updatedVideoUrls,
+          audioUrl: audioUrl || '',
+        })
+      }
+      const { _id, ...petDocRest } = petDoc
+      await setDocument('pets', petId, {
+        ...petDocRest,
+        manifest,
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'admin-media',
+      })
+    }
+
+    return {
+      petId,
+      actionId,
+      videoUrl,
+      sequence,
+      totalVideos: updatedVideoUrls.length,
     }
   } finally {
     await fsp.rm(workDir, { recursive: true, force: true }).catch(() => undefined)
@@ -736,56 +1100,62 @@ async function extractFrame(sourcePath, index, targetPath) {
   ])
 }
 
-function buildPetManifest({ petId, name, frameCount, audioUrl }) {
-  const safeFrameCount = Math.max(1, Number(frameCount || 1))
-
+function buildPetManifest({ petId, name, audioUrl }) {
   return {
     schemaVersion: 1,
     manifestVersion: `${formatDate(new Date())}-${petId}-001`,
     petId,
     name,
     defaultState: 'idle',
-    canvas: {
-      width: 720,
-      height: 960,
-      anchorX: 0.5,
-      anchorY: 0.94,
-      safeArea: {
-        x: 36,
-        y: 48,
-        width: 648,
-        height: 864,
-      },
-    },
-    assets: {
-      baseUrl: `${cloudUrl(`pets/${petId}/actions/idle/frames`)}/`,
-      audioBaseUrl: audioUrl ? `${cloudUrl(`pets/${petId}/actions/idle/audio`)}/` : '',
-    },
     actions: [
       {
         id: 'idle',
         type: 'loop',
         label: '待机',
         fps: 24,
-        frameCount: safeFrameCount,
-        framePattern: 'frame_{index:0000}.png',
-        startIndex: 1,
-        endIndex: safeFrameCount,
-        connectAt: [1, Math.min(30, safeFrameCount), Math.min(60, safeFrameCount), safeFrameCount],
-        next: ['idle', 'listen'],
+        next: ['idle', 'listening'],
+        videoUrls: [],
         audioUrl: audioUrl || '',
       },
       {
-        id: 'listen',
+        id: 'listening',
         type: 'loop',
         label: '倾听',
         fps: 24,
-        frameCount: Math.min(40, safeFrameCount),
-        framePattern: 'frame_{index:0000}.png',
-        startIndex: Math.min(30, safeFrameCount),
-        endIndex: Math.min(69, safeFrameCount),
-        connectAt: [Math.min(30, safeFrameCount), Math.min(50, safeFrameCount), Math.min(69, safeFrameCount)],
+        next: ['reply', 'idle'],
+        videoUrls: [],
+      },
+      {
+        id: 'reply',
+        type: 'transition',
+        label: '回应',
+        fps: 24,
         next: ['idle'],
+        videoUrls: [],
+      },
+      {
+        id: 'sleep-enter',
+        type: 'transition',
+        label: '入睡过渡',
+        fps: 24,
+        next: ['sleep-loop'],
+        videoUrls: [],
+      },
+      {
+        id: 'sleep-loop',
+        type: 'loop',
+        label: '睡眠循环',
+        fps: 24,
+        next: ['sleep-loop', 'sleep-exit'],
+        videoUrls: [],
+      },
+      {
+        id: 'sleep-exit',
+        type: 'transition',
+        label: '唤醒过渡',
+        fps: 24,
+        next: ['idle'],
+        videoUrls: [],
       },
     ],
     sounds: audioUrl ? [{ id: 'idle-loop', url: audioUrl, loop: true }] : [],

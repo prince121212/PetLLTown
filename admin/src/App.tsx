@@ -1,7 +1,8 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowLeft,
   CheckCircle2,
   CloudUpload,
   ExternalLink,
@@ -10,7 +11,9 @@ import {
   Image,
   ListChecks,
   Loader2,
+  Lock,
   PawPrint,
+  Play,
   RefreshCw,
   RotateCcw,
   Save,
@@ -18,12 +21,15 @@ import {
   Star,
   Trash2,
   Undo2,
+  Unlock,
 } from 'lucide-react'
 import {
+  addActionVideo,
   createPetFromWebm,
   createRoomFromMedia,
   discardDraft,
   getAdminState,
+  getPetManifest,
   inspectPetWebm,
   publishConfig,
   rollbackToVersion,
@@ -51,6 +57,7 @@ import {
   BootstrapConfig,
   MediaCreateResult,
   MediaInspectResult,
+  PetManifestSummary,
   PetOption,
   RoomMediaCreateResult,
   RoomOption,
@@ -239,6 +246,16 @@ export function App() {
               }
             />
             <Route
+              path="/pets/:petId"
+              element={
+                <PetManagePage
+                  config={workingConfig}
+                  onChange={updateConfig}
+                  saving={saving}
+                />
+              }
+            />
+            <Route
               path="/rooms"
               element={
                 <RoomsView
@@ -404,7 +421,7 @@ function PetsView({
   onChange: (config: BootstrapConfig) => void
   saving: boolean
 }) {
-  const [editing, setEditing] = useState<PetOption | null>(null)
+  const navigate = useNavigate()
 
   function togglePet(pet: PetOption) {
     onChange(togglePetEnabled(config, pet.id))
@@ -438,7 +455,7 @@ function PetsView({
           String(pet.frameOffset ?? 0),
           config.defaultPetId === pet.id ? <StarLabel /> : '否',
           <div className="row-actions">
-            <button onClick={() => setEditing(pet)} type="button">编辑</button>
+            <button onClick={() => navigate(`/pets/${pet.id}`)} type="button">管理</button>
             <button
               disabled={config.defaultPetId === pet.id || pet.enabled === false}
               onClick={() => setDefault(pet)}
@@ -451,27 +468,384 @@ function PetsView({
             <button className="danger-button" onClick={() => deletePet(pet)} type="button" title="删除宠物">
               <Trash2 size={14} />
             </button>
-            {isOpenableUrl(pet.videoUrl) && (
-              <button onClick={() => openUrl(pet.videoUrl || '')} title="打开视频地址" type="button">
-                <ExternalLink size={14} />
-              </button>
-            )}
           </div>,
         ])}
       />
-      {editing && (
-        <PetEditor
-          pet={editing}
-          config={config}
-          saving={saving}
-          onCancel={() => setEditing(null)}
-          onSave={(pet) => {
-            onChange(upsertPet(config, pet))
-            setEditing(null)
-          }}
+    </section>
+  )
+}
+
+function PetManagePage({
+  config,
+  onChange,
+  saving,
+}: {
+  config: BootstrapConfig
+  onChange: (config: BootstrapConfig) => void
+  saving: boolean
+}) {
+  const { petId } = useParams<{ petId: string }>()
+  const navigate = useNavigate()
+  const pet = config.pets.find((p) => p.id === petId)
+  const [draft, setDraft] = useState<PetOption | null>(null)
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set())
+  const [manifest, setManifest] = useState<PetManifestSummary | null>(null)
+  const [manifestLoading, setManifestLoading] = useState(false)
+  const [manifestError, setManifestError] = useState('')
+
+  useEffect(() => {
+    if (pet) setDraft({ ...pet })
+  }, [petId])
+
+  useEffect(() => {
+    if (!petId) return
+    setManifestLoading(true)
+    setManifestError('')
+    getPetManifest(petId)
+      .then(setManifest)
+      .catch((err) => setManifestError(err.message || '加载失败'))
+      .finally(() => setManifestLoading(false))
+  }, [petId])
+
+  if (!pet || !draft) {
+    return (
+      <section className="panel">
+        <div className="error-state">未找到宠物 {petId}</div>
+        <button className="secondary-button" onClick={() => navigate('/pets')} type="button">
+          <ArrowLeft size={14} /> 返回列表
+        </button>
+      </section>
+    )
+  }
+
+  function toggleLock(field: string) {
+    setUnlocked((prev) => {
+      const next = new Set(prev)
+      if (next.has(field)) next.delete(field)
+      else next.add(field)
+      return next
+    })
+  }
+
+  function handleSave() {
+    if (!draft) return
+    onChange(upsertPet(config, { ...draft, id: draft.id.trim(), manifestKey: draft.manifestKey || `${draft.id.trim()}/manifest.json` }))
+  }
+
+  const hasChanges = draft && pet && JSON.stringify(draft) !== JSON.stringify(pet)
+
+  return (
+    <section className="pet-manage-page">
+      <div className="panel">
+        <div className="panel-head">
+          <button className="secondary-button" onClick={() => navigate('/pets')} type="button">
+            <ArrowLeft size={14} /> 返回宠物列表
+          </button>
+          <h2>{pet.name}（{pet.id}）</h2>
+        </div>
+
+        <div className="manage-section">
+          <h3>基本信息</h3>
+          <div className="locked-fields">
+            <LockedField label="ID" value={draft.id} disabled />
+            <LockedField
+              label="名称"
+              value={draft.name}
+              locked={!unlocked.has('name')}
+              onToggle={() => toggleLock('name')}
+              onChange={(v) => setDraft({ ...draft, name: v })}
+            />
+            <LockedField
+              label="副标题"
+              value={draft.subtitle}
+              locked={!unlocked.has('subtitle')}
+              onToggle={() => toggleLock('subtitle')}
+              onChange={(v) => setDraft({ ...draft, subtitle: v })}
+            />
+            <LockedField
+              label="排序"
+              value={String(draft.frameOffset ?? 0)}
+              locked={!unlocked.has('frameOffset')}
+              onToggle={() => toggleLock('frameOffset')}
+              onChange={(v) => setDraft({ ...draft, frameOffset: Number(v) || 0 })}
+            />
+            <LockedField
+              label="manifestKey"
+              value={draft.manifestKey || ''}
+              locked={!unlocked.has('manifestKey')}
+              onToggle={() => toggleLock('manifestKey')}
+              onChange={(v) => setDraft({ ...draft, manifestKey: v })}
+            />
+            <LockedField
+              label="视频 URL"
+              value={draft.videoUrl || ''}
+              locked={!unlocked.has('videoUrl')}
+              onToggle={() => toggleLock('videoUrl')}
+              onChange={(v) => setDraft({ ...draft, videoUrl: v })}
+            />
+            <LockedField
+              label="预览图 URL"
+              value={draft.thumbUrl || ''}
+              locked={!unlocked.has('thumbUrl')}
+              onToggle={() => toggleLock('thumbUrl')}
+              onChange={(v) => setDraft({ ...draft, thumbUrl: v })}
+            />
+            <LockedField
+              label="倾听图 URL"
+              value={draft.listenFrameUrl || ''}
+              locked={!unlocked.has('listenFrameUrl')}
+              onToggle={() => toggleLock('listenFrameUrl')}
+              onChange={(v) => setDraft({ ...draft, listenFrameUrl: v })}
+            />
+            <LockedField
+              label="音频 URL"
+              value={draft.audioUrl || ''}
+              locked={!unlocked.has('audioUrl')}
+              onToggle={() => toggleLock('audioUrl')}
+              onChange={(v) => setDraft({ ...draft, audioUrl: v })}
+            />
+            <LockedCheckField
+              label="启用"
+              checked={draft.enabled !== false}
+              locked={!unlocked.has('enabled')}
+              onToggle={() => toggleLock('enabled')}
+              onChange={(v) => setDraft({ ...draft, enabled: v })}
+            />
+          </div>
+          <button
+            className="primary-button"
+            disabled={saving || !hasChanges}
+            onClick={handleSave}
+            type="button"
+          >
+            {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            保存到草稿
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h3>场景视频</h3>
+        </div>
+        {manifestLoading && <div className="muted">加载中…</div>}
+        {manifestError && <div className="error-state">{manifestError}</div>}
+        {manifest && !manifest.actions.length && <div className="muted">该宠物还没有上传任何场景视频</div>}
+        {manifest && manifest.actions.map((action) => (
+          <div key={action.id} className="action-section">
+            <div className="action-header">
+              <h3>{action.label}（{action.id}）</h3>
+              <span className="action-count">{action.videoUrls.length} 个视频</span>
+              {action.audioUrl && <span className="action-audio-badge">有音频</span>}
+              {!action.audioUrl && <span className="muted">无音频</span>}
+            </div>
+            {action.videoUrls.length === 0 && <span className="muted">暂无视频</span>}
+            <div className="action-media-grid">
+              {action.videoUrls.map((url, index) => (
+                <MediaPreviewCard
+                  key={url}
+                  videoUrl={url}
+                  audioUrl={action.audioUrl}
+                  index={index}
+                  canDelete={action.videoUrls.length > 1}
+                  onDelete={() => {
+                    if (!window.confirm(`确认删除第 ${index + 1} 个视频？关联音频也会一并删除。`)) return
+                    import('./api').then((m) => m.deleteActionVideo(petId!, action.id, url)).then(() => {
+                      getPetManifest(petId!).then(setManifest).catch(() => undefined)
+                    }).catch((err) => window.alert(err.message || '删除失败'))
+                  }}
+                />
+              ))}
+              <ActionUploader petId={petId!} actionId={action.id} onUploaded={() => {
+                getPetManifest(petId!).then(setManifest).catch(() => undefined)
+              }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function LockedField({
+  label,
+  value,
+  locked = true,
+  disabled = false,
+  onToggle,
+  onChange,
+}: {
+  label: string
+  value: string
+  locked?: boolean
+  disabled?: boolean
+  onToggle?: () => void
+  onChange?: (value: string) => void
+}) {
+  return (
+    <div className={`locked-field ${!locked ? 'unlocked-field' : ''} ${disabled ? 'permanent-lock' : ''}`}>
+      <span className="locked-field-label">{label}</span>
+      {locked || disabled ? (
+        <span className="locked-field-value">{value || '—'}</span>
+      ) : (
+        <input
+          className="locked-field-input"
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
         />
       )}
-    </section>
+      {!disabled && (
+        <button className="lock-toggle" onClick={onToggle} type="button" title={locked ? '解锁编辑' : '锁定'}>
+          {locked ? <Lock size={14} /> : <Unlock size={14} />}
+        </button>
+      )}
+      {disabled && <Lock size={14} className="lock-permanent" />}
+    </div>
+  )
+}
+
+function LockedCheckField({
+  label,
+  checked,
+  locked = true,
+  onToggle,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  locked?: boolean
+  onToggle?: () => void
+  onChange?: (value: boolean) => void
+}) {
+  return (
+    <div className={`locked-field ${!locked ? 'unlocked-field' : ''}`}>
+      <span className="locked-field-label">{label}</span>
+      {locked ? (
+        <span className="locked-field-value">{checked ? '是' : '否'}</span>
+      ) : (
+        <input type="checkbox" checked={checked} onChange={(e) => onChange?.(e.target.checked)} />
+      )}
+      <button className="lock-toggle" onClick={onToggle} type="button" title={locked ? '解锁编辑' : '锁定'}>
+        {locked ? <Lock size={14} /> : <Unlock size={14} />}
+      </button>
+    </div>
+  )
+}
+
+function MediaPreviewCard({ videoUrl, audioUrl, index, canDelete, onDelete }: { videoUrl: string; audioUrl: string; index: number; canDelete?: boolean; onDelete?: () => void }) {
+  const [videoSrc, setVideoSrc] = useState('')
+  const [audioSrc, setAudioSrc] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+
+  async function loadMedia() {
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const resolveUrl = async (url: string) => {
+        if (!url) return ''
+        if (!url.startsWith('cloud://')) return url
+        const { url: resolved } = await import('./api').then((m) => m.resolveCloudUrl(url))
+        return resolved
+      }
+      const [vSrc, aSrc] = await Promise.all([resolveUrl(videoUrl), resolveUrl(audioUrl)])
+      setVideoSrc(vSrc)
+      setAudioSrc(aSrc)
+      setExpanded(true)
+    } catch {
+      window.alert('无法解析媒体地址')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="media-preview-card">
+      <div className="media-preview-header">
+        <div className="media-preview-info" onClick={loadMedia}>
+          <Play size={16} />
+          <span className="media-preview-seq">#{index + 1}</span>
+          <span className="media-preview-name">{videoUrl.split('/').pop()}</span>
+          {loading && <Loader2 size={14} className="spin" />}
+        </div>
+        <button
+          className="media-delete-btn"
+          disabled={!canDelete}
+          onClick={onDelete}
+          type="button"
+          title={canDelete ? '删除此视频' : '该场景仅剩一个视频，不可删除'}
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+      {expanded && (
+        <div className="media-preview-player">
+          <video className="media-preview-video" src={videoSrc} controls autoPlay loop muted />
+          {audioSrc ? (
+            <audio className="media-preview-audio" src={audioSrc} controls />
+          ) : (
+            <span className="muted media-preview-no-audio">该场景无音频</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActionUploader({ petId, actionId, onUploaded }: { petId: string; actionId: string; onUploaded: () => void }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const fileInputRef = { current: null as HTMLInputElement | null }
+
+  async function handleUpload() {
+    if (!file) return
+    setUploading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const formData = new FormData()
+      formData.set('petId', petId)
+      formData.set('actionId', actionId)
+      formData.set('source', file)
+      const result = await addActionVideo(formData)
+      setSuccess(`第 ${result.sequence} 个视频上传成功`)
+      setFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      onUploaded()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="action-uploader">
+      <label className="action-upload-box">
+        <input
+          ref={(el) => { fileInputRef.current = el }}
+          type="file"
+          accept="video/webm"
+          onChange={(e) => { setFile(e.target.files?.[0] || null); setError(''); setSuccess('') }}
+          hidden
+        />
+        <CloudUpload size={18} />
+        <span>{file ? file.name : '添加视频'}</span>
+      </label>
+      {file && (
+        <button className="primary-button action-upload-btn" onClick={handleUpload} disabled={uploading} type="button">
+          {uploading ? <Loader2 size={14} className="spin" /> : <CloudUpload size={14} />}
+          {uploading ? '处理中…' : '上传'}
+        </button>
+      )}
+      {error && <span className="action-upload-error">{error}</span>}
+      {success && <span className="action-upload-success">{success}</span>}
+    </div>
   )
 }
 
@@ -732,8 +1106,8 @@ function MediaView({ onState }: { onState: (state: AdminState) => void }) {
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>宠物素材自动化</h2>
-        <span className="muted">第一版支持单个 idle WebM，处理后写入草稿</span>
+        <h2>创建新宠物</h2>
+        <span className="muted">上传 idle WebM 创建全新宠物，处理后写入草稿</span>
       </div>
       <form className="form-grid" onSubmit={submit}>
         <TextField label="宠物 ID" value={petId} onChange={setPetId} placeholder="maolizi" />

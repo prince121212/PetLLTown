@@ -1,4 +1,4 @@
-import { AdminState, BootstrapConfig, MediaCreateResult, MediaInspectResult, RoomMediaCreateResult } from './types'
+import { ActionVideoResult, AdminState, BootstrapConfig, MediaCreateResult, MediaInspectResult, PetManifestSummary, RoomMediaCreateResult } from './types'
 
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
@@ -75,9 +75,24 @@ export function createRoomFromMedia(formData: FormData): Promise<RoomMediaCreate
   return requestForm<RoomMediaCreateResult>('/api/media/rooms/create-from-media', formData)
 }
 
+export function addActionVideo(formData: FormData): Promise<ActionVideoResult> {
+  return requestForm<ActionVideoResult>('/api/media/pets/add-action-video', formData)
+}
+
 export function resolveCloudUrl(fileID: string): Promise<{ url: string }> {
   return requestJson<{ url: string }>('/api/resolve-url', {
     method: 'POST',
     body: JSON.stringify({ fileID }),
+  })
+}
+
+export function getPetManifest(petId: string): Promise<PetManifestSummary> {
+  return requestJson<PetManifestSummary>(`/api/media/pets/${encodeURIComponent(petId)}/manifest`)
+}
+
+export function deleteActionVideo(petId: string, actionId: string, videoUrl: string): Promise<{ petId: string; actionId: string; videoUrls: string[] }> {
+  return requestJson(`/api/media/pets/${encodeURIComponent(petId)}/actions/${encodeURIComponent(actionId)}/videos`, {
+    method: 'DELETE',
+    body: JSON.stringify({ videoUrl }),
   })
 }

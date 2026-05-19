@@ -5,12 +5,9 @@ export interface PetAction {
   type: PetActionType
   label: string
   fps: number
-  frameCount: number
-  framePattern: string
-  startIndex: number
-  endIndex: number
-  connectAt: number[]
   next: string[]
+  videoUrls?: string[]
+  audioUrl?: string
 }
 
 export interface PetManifest {
@@ -19,10 +16,6 @@ export interface PetManifest {
   petId: string
   name: string
   defaultState: string
-  assets: {
-    baseUrl: string
-    audioBaseUrl: string
-  }
   actions: PetAction[]
 }
 
@@ -34,27 +27,17 @@ export interface PetManifestFunctionResult {
 
 export const FALLBACK_PET_MANIFEST: PetManifest = {
   schemaVersion: 1,
-  manifestVersion: 'local-fallback-2026-05-15',
+  manifestVersion: 'local-fallback-2026-05-19',
   petId: 'xiaotuanzi',
   name: '小团子',
   defaultState: 'idle',
-  assets: {
-    baseUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/',
-    audioBaseUrl: '',
-  },
   actions: [
-    {
-      id: 'idle',
-      type: 'loop',
-      label: '待机',
-      fps: 15,
-      frameCount: 150,
-      framePattern: 'frame_{index:0000}.png',
-      startIndex: 1,
-      endIndex: 150,
-      connectAt: [1, 30, 60, 90, 120, 150],
-      next: ['idle', 'listen'],
-    },
+    { id: 'idle', type: 'loop', label: '待机', fps: 15, next: ['idle', 'listening'] },
+    { id: 'listening', type: 'loop', label: '倾听', fps: 15, next: ['reply', 'idle'] },
+    { id: 'reply', type: 'transition', label: '回应', fps: 15, next: ['idle'] },
+    { id: 'sleep-enter', type: 'transition', label: '入睡过渡', fps: 15, next: ['sleep-loop'] },
+    { id: 'sleep-loop', type: 'loop', label: '睡眠循环', fps: 15, next: ['sleep-loop', 'sleep-exit'] },
+    { id: 'sleep-exit', type: 'transition', label: '唤醒过渡', fps: 15, next: ['idle'] },
   ],
 }
 
@@ -69,18 +52,13 @@ function isAction(value: unknown): value is PetAction {
     typeof value.id === 'string' &&
     (value.type === 'loop' || value.type === 'transition') &&
     typeof value.label === 'string' &&
-    typeof value.fps === 'number' &&
-    typeof value.frameCount === 'number' &&
-    typeof value.framePattern === 'string' &&
-    typeof value.startIndex === 'number' &&
-    typeof value.endIndex === 'number'
+    typeof value.fps === 'number'
   )
 }
 
 export function normalizePetManifest(value: unknown): PetManifest {
   if (!isRecord(value)) return FALLBACK_PET_MANIFEST
 
-  const assets = isRecord(value.assets) ? value.assets : {}
   const actions = Array.isArray(value.actions) ? value.actions.filter(isAction) : FALLBACK_PET_MANIFEST.actions
 
   return {
@@ -89,10 +67,6 @@ export function normalizePetManifest(value: unknown): PetManifest {
     petId: typeof value.petId === 'string' ? value.petId : FALLBACK_PET_MANIFEST.petId,
     name: typeof value.name === 'string' ? value.name : FALLBACK_PET_MANIFEST.name,
     defaultState: typeof value.defaultState === 'string' ? value.defaultState : FALLBACK_PET_MANIFEST.defaultState,
-    assets: {
-      baseUrl: typeof assets.baseUrl === 'string' ? assets.baseUrl : FALLBACK_PET_MANIFEST.assets.baseUrl,
-      audioBaseUrl: typeof assets.audioBaseUrl === 'string' ? assets.audioBaseUrl : FALLBACK_PET_MANIFEST.assets.audioBaseUrl,
-    },
     actions: actions.length ? actions : FALLBACK_PET_MANIFEST.actions,
   }
 }

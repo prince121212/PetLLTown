@@ -7,6 +7,7 @@ import {
   SettingItem,
   normalizeBootstrapConfig,
 } from '../../config/bootstrap'
+import { PetManifest, normalizePetManifest } from '../../config/petManifest'
 
 type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinking' | 'success' | 'error'
 
@@ -199,6 +200,8 @@ interface PetVideoFrameData {
   data: ArrayBuffer
   width: number
   height: number
+  pkPts?: number
+  pkDts?: number
 }
 
 interface AlphaVideoSplit {
@@ -244,6 +247,11 @@ let petVideoFrameData: Uint8Array | null = null
 let petVideoSourceCache: Record<string, string> = {}
 let petVideoStartingUrl = ''
 let petVideoActiveUrl = ''
+let petVideoNextDecoder: PetVideoDecoder | null = null
+let petVideoNextSource = ''
+let petVideoNextReady = false
+let petVideoFrameIndex = 0
+const PET_VIDEO_TRIM_FRAMES = 5
 let petVideoFirstFrameLogged = false
 let petVideoFrameShapeWarned = false
 let petVideoFramePending = false
@@ -251,6 +259,8 @@ let petVideoAlphaSamplesLogged = false
 let petVideoRenderPaused = false
 let activePetVideoUrl = ''
 let activePetAudioUrl = ''
+let petVideoPlaylist: Array<{ videoUrl: string; audioUrl: string }> = []
+let petVideoPlaylistIndex = 0
 let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
@@ -653,25 +663,23 @@ Component({
             petVideoStartTimer = 0
           }
           petVideoStartingUrl = ''
+          petVideoFrameIndex = 0
           console.info('[index] alpha video decoder started:', {
             url,
             source,
-            detail: args[0] || null,
+            detail: (args[0] as Record<string, unknown> | undefined) || null,
           })
           this.renderAlphaVideoFrame()
-        })
-        decoder.on('seek', (...args) => {
-          console.info('[index] alpha video decoder seek:', args[0] || null)
-        })
-        decoder.on('stop', () => {
-          console.info('[index] alpha video decoder stopped:', { url })
+          this.prepareNextDecoder()
         })
         decoder.on('ended', () => {
-          console.info('[index] alpha video decoder ended, seeking to start')
-          try {
-            decoder.seek(0)
-          } catch (error) {
-            console.warn('[index] alpha video seek failed:', error)
+          if (petVideoDecoder !== decoder) return
+          if (petVideoPlaylist.length > 1) {
+            petVideoPlaylistIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
+            const next = petVideoPlaylist[petVideoPlaylistIndex]
+            this.playNextInPlaylist(next)
+          } else {
+            try { decoder.seek(0) } catch {}
           }
         })
         const startResult = decoder.start({ source, mode: 0 })
@@ -702,6 +710,95 @@ Component({
       }
     },
 
+    async playNextInPlaylist(item: { videoUrl: string; audioUrl: string }) {
+      if (!item.videoUrl) return
+
+      try {
+        if (petVideoNextDecoder && petVideoNextReady) {
+          if (petVideoDecoder) {
+            try { petVideoDecoder.stop(); petVideoDecoder.remove() } catch {}
+          }
+          petVideoDecoder = petVideoNextDecoder
+          petVideoActiveUrl = item.videoUrl
+          petVideoFrameIndex = 0
+          petVideoNextDecoder = null
+          petVideoNextSource = ''
+          petVideoNextReady = false
+          this.renderAlphaVideoFrame()
+        } else {
+          const source = await this.resolveVideoSource(item.videoUrl)
+          if (petVideoDecoder) {
+            try { petVideoDecoder.stop(); petVideoDecoder.remove() } catch {}
+          }
+          const decoder = this.createVideoDecoder()
+          if (!decoder) return
+          petVideoDecoder = decoder
+          petVideoActiveUrl = item.videoUrl
+          petVideoFrameIndex = 0
+          petVideoNextDecoder = null
+          petVideoNextSource = ''
+          petVideoNextReady = false
+          this.setupDecoderEvents(decoder, item.videoUrl)
+          decoder.start({ source, mode: 0 })
+        }
+
+        activePetAudioUrl = item.audioUrl || ''
+        this.startPetAudio()
+        this.prepareNextDecoder()
+      } catch (error) {
+        console.warn('[index] playNextInPlaylist failed:', error)
+      }
+    },
+
+    async prepareNextDecoder() {
+      if (petVideoPlaylist.length <= 1) return
+
+      const nextIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
+      const nextItem = petVideoPlaylist[nextIndex]
+      if (!nextItem.videoUrl) return
+
+      try {
+        const source = await this.resolveVideoSource(nextItem.videoUrl)
+        if (petVideoNextDecoder) {
+          try { petVideoNextDecoder.stop(); petVideoNextDecoder.remove() } catch {}
+        }
+        petVideoNextReady = false
+        const decoder = this.createVideoDecoder()
+        if (!decoder) return
+
+        decoder.on('start', () => {
+          petVideoNextReady = true
+        })
+        this.setupDecoderEvents(decoder, nextItem.videoUrl)
+        decoder.start({ source, mode: 0 })
+        petVideoNextDecoder = decoder
+        petVideoNextSource = source
+      } catch (error) {
+        petVideoNextDecoder = null
+        petVideoNextSource = ''
+        petVideoNextReady = false
+      }
+    },
+
+    setupDecoderEvents(decoder: PetVideoDecoder, url: string) {
+      decoder.on('start', () => {
+        if (petVideoDecoder === decoder) {
+          petVideoFrameIndex = 0
+          this.renderAlphaVideoFrame()
+        }
+      })
+      decoder.on('ended', () => {
+        if (petVideoDecoder !== decoder) return
+        if (petVideoPlaylist.length > 1) {
+          petVideoPlaylistIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
+          const next = petVideoPlaylist[petVideoPlaylistIndex]
+          this.playNextInPlaylist(next)
+        } else {
+          try { decoder.seek(0) } catch {}
+        }
+      })
+    },
+
     stopAlphaVideo() {
       petVideoRenderPaused = false
       petVideoStartingUrl = ''
@@ -730,6 +827,16 @@ Component({
           console.warn('[index] alpha video stop failed:', error)
         }
         petVideoDecoder = null
+      }
+
+      if (petVideoNextDecoder) {
+        try {
+          petVideoNextDecoder.stop()
+          petVideoNextDecoder.remove()
+        } catch {}
+        petVideoNextDecoder = null
+        petVideoNextSource = ''
+        petVideoNextReady = false
       }
     },
 
@@ -837,7 +944,7 @@ Component({
             .then((frame) => {
               petVideoFramePending = false
               if (frame && frame.data && frame.width && frame.height) {
-                this.drawAlphaVideoFrame(frame)
+                this.handleVideoFrame(frame)
               }
             })
             .catch((error) => {
@@ -845,13 +952,21 @@ Component({
               console.warn('[index] alpha video getFrameData failed:', error)
             })
         } else if (frameResult && frameResult.data && frameResult.width && frameResult.height) {
-          this.drawAlphaVideoFrame(frameResult)
+          this.handleVideoFrame(frameResult)
         }
       }
 
       petVideoFrameRequest = petVideoCanvas.requestAnimationFrame(() => {
         this.renderAlphaVideoFrame()
       })
+    },
+
+    handleVideoFrame(frame: PetVideoFrameData) {
+      petVideoFrameIndex++
+
+      if (petVideoFrameIndex <= PET_VIDEO_TRIM_FRAMES) return
+
+      this.drawAlphaVideoFrame(frame)
     },
 
     drawAlphaVideoFrame(frame: PetVideoFrameData) {
@@ -1057,6 +1172,7 @@ Component({
       this.setData({ ...buildPageData(config), configReady: true })
       this.resolveHomeMedia(config)
       this.startPetRenderer()
+      this.fetchPetManifest(config.defaultPetId)
     },
 
     async fetchBootstrapConfig() {
@@ -1082,6 +1198,39 @@ Component({
       } catch (error) {
         console.warn('[index] bootstrap fallback:', error)
         this.applyBootstrapConfig(FALLBACK_BOOTSTRAP_CONFIG)
+      }
+    },
+
+    async fetchPetManifest(petId: string) {
+      if (!wx.cloud) return
+
+      try {
+        const response = await wx.cloud.callFunction({
+          name: 'getPetManifest',
+          data: { petId },
+        })
+
+        if (!response.result || (response.result as Record<string, unknown>).ok === false) return
+
+        const manifest = normalizePetManifest((response.result as Record<string, unknown>).data)
+        const playlist: Array<{ videoUrl: string; audioUrl: string }> = []
+
+        for (const action of manifest.actions) {
+          if (Array.isArray(action.videoUrls)) {
+            for (const url of action.videoUrls) {
+              if (url) playlist.push({ videoUrl: url, audioUrl: action.audioUrl || '' })
+            }
+          }
+        }
+
+        if (playlist.length > 0) {
+          petVideoPlaylist = playlist
+          petVideoPlaylistIndex = 0
+          console.info('[index] pet video playlist loaded:', { petId, count: playlist.length })
+          this.prepareNextDecoder()
+        }
+      } catch (error) {
+        console.warn('[index] fetchPetManifest failed:', error)
       }
     },
 
@@ -1159,6 +1308,9 @@ Component({
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
       activePetAudioUrl = (selected && selected.audioUrl) || ''
+      petVideoPlaylist = []
+      petVideoPlaylistIndex = 0
+      this.fetchPetManifest(selected.id)
       this.enterHomePage({
         petName: selected.name,
         settingsThumb: (selected && selected.thumbUrl) || '',

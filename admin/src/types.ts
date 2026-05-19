@@ -125,7 +125,6 @@ export interface MediaCreateResult {
     videoUrl: string
     thumbUrl: string
     listenFrameUrl: string
-    frameCount: number
   }
   draftIssues: ValidationIssue[]
   state: AdminState
@@ -151,4 +150,26 @@ export interface RoomMediaCreateResult {
   }
   draftIssues: ValidationIssue[]
   state: AdminState
+}
+
+export interface ActionVideoResult {
+  petId: string
+  actionId: string
+  videoUrl: string
+  sequence: number
+  totalVideos: number
+  state: AdminState
+}
+
+export interface PetActionSummary {
+  id: string
+  label: string
+  videoUrls: string[]
+  audioUrl: string
+}
+
+export interface PetManifestSummary {
+  petId: string
+  name: string
+  actions: PetActionSummary[]
 }

@@ -1,74 +1,16 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "2026-05-15-xiaotuanzi-001",
+  "manifestVersion": "2026-05-19-xiaotuanzi-002",
   "petId": "xiaotuanzi",
   "name": "小团子",
   "defaultState": "idle",
-  "canvas": {
-    "width": 1024,
-    "height": 1024,
-    "anchorX": 0.5,
-    "anchorY": 0.92,
-    "safeArea": {
-      "x": 96,
-      "y": 80,
-      "width": 832,
-      "height": 864
-    }
-  },
-  "assets": {
-    "baseUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/",
-    "audioBaseUrl": ""
-  },
   "actions": [
-    {
-      "id": "idle",
-      "type": "loop",
-      "label": "待机",
-      "fps": 15,
-      "frameCount": 150,
-      "framePattern": "frame_{index:0000}.png",
-      "startIndex": 1,
-      "endIndex": 150,
-      "connectAt": [1, 30, 60, 90, 120, 150],
-      "next": ["idle", "listen"]
-    },
-    {
-      "id": "listen",
-      "type": "loop",
-      "label": "倾听",
-      "fps": 15,
-      "frameCount": 36,
-      "framePattern": "frame_{index:0000}.png",
-      "startIndex": 24,
-      "endIndex": 59,
-      "connectAt": [30, 45, 59],
-      "next": ["idle", "happy"]
-    },
-    {
-      "id": "happy",
-      "type": "transition",
-      "label": "开心回应",
-      "fps": 15,
-      "frameCount": 40,
-      "framePattern": "frame_{index:0000}.png",
-      "startIndex": 60,
-      "endIndex": 99,
-      "connectAt": [99],
-      "next": ["idle"]
-    },
-    {
-      "id": "sleepy",
-      "type": "loop",
-      "label": "困困",
-      "fps": 12,
-      "frameCount": 40,
-      "framePattern": "frame_{index:0000}.png",
-      "startIndex": 100,
-      "endIndex": 139,
-      "connectAt": [100, 120, 139],
-      "next": ["idle"]
-    }
+    { "id": "idle", "type": "loop", "label": "待机", "fps": 15, "next": ["idle", "listening"], "videoUrls": [] },
+    { "id": "listening", "type": "loop", "label": "倾听", "fps": 15, "next": ["reply", "idle"], "videoUrls": [] },
+    { "id": "reply", "type": "transition", "label": "回应", "fps": 15, "next": ["idle"], "videoUrls": [] },
+    { "id": "sleep-enter", "type": "transition", "label": "入睡过渡", "fps": 15, "next": ["sleep-loop"], "videoUrls": [] },
+    { "id": "sleep-loop", "type": "loop", "label": "睡眠循环", "fps": 15, "next": ["sleep-loop", "sleep-exit"], "videoUrls": [] },
+    { "id": "sleep-exit", "type": "transition", "label": "唤醒过渡", "fps": 15, "next": ["idle"], "videoUrls": [] }
   ],
   "sounds": [],
   "personality": {
