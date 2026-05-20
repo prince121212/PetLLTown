@@ -50,12 +50,34 @@ async function readDatabaseManifest(petId) {
   }
 }
 
+async function readBootstrapPetVideoUrl(petId) {
+  try {
+    const result = await db.collection('app_configs').doc('bootstrap').get()
+    const config = result && result.data && result.data.config ? result.data.config : result && result.data
+    if (!config || !Array.isArray(config.pets)) return ''
+    const pet = config.pets.find((p) => p.id === petId)
+    return pet && pet.videoUrl ? pet.videoUrl : ''
+  } catch {
+    return ''
+  }
+}
+
 exports.main = async (event = {}) => {
   const wxContext = cloud.getWXContext()
   const requestedPetId = normalizePetId(event.petId)
   const databaseManifest = await readDatabaseManifest(requestedPetId)
   const bundledManifest = bundledManifests[requestedPetId] || bundledManifests[DEFAULT_PET_ID]
   const manifest = databaseManifest || bundledManifest
+
+  if (manifest && Array.isArray(manifest.actions)) {
+    const idleAction = manifest.actions.find((a) => a.id === 'idle')
+    if (idleAction && (!Array.isArray(idleAction.videoUrls) || idleAction.videoUrls.length === 0)) {
+      const legacyUrl = await readBootstrapPetVideoUrl(requestedPetId)
+      if (legacyUrl) {
+        idleAction.videoUrls = [legacyUrl]
+      }
+    }
+  }
 
   return {
     ok: true,

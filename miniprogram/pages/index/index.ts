@@ -7,7 +7,21 @@ import {
   SettingItem,
   normalizeBootstrapConfig,
 } from '../../config/bootstrap'
-import { normalizePetManifest } from '../../config/petManifest'
+import { PetAction, normalizePetManifest } from '../../config/petManifest'
+import {
+  PetState,
+  advanceQueue,
+  applyEvent as soulApplyEvent,
+  buildQueue,
+  computeRelationship,
+  createDefaultState,
+  getTimeOfDay,
+  handleEvent as soulHandleEvent,
+  moodToIcon,
+  setMood,
+  tick as soulTick,
+  updateConsecutiveDays,
+} from '../../utils/soulEngine'
 
 type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinking' | 'success' | 'error'
 
@@ -42,7 +56,6 @@ interface PageData {
   orbPressed: boolean
   drawerOpen: boolean
   statEnergy: number
-  statBoredom: number
   statAffection: number
   relationshipIcon: string
   relationshipText: string
@@ -267,8 +280,13 @@ let petVideoAlphaSamplesLogged = false
 let petVideoRenderPaused = false
 let activePetVideoUrl = ''
 let activePetAudioUrl = ''
-let petVideoPlaylist: Array<{ videoUrl: string; audioUrl: string }> = []
-let petVideoPlaylistIndex = 0
+let petState: PetState = createDefaultState()
+let petSceneQueue: string[] = []
+let petManifestActions: PetAction[] = []
+let soulTickTimer = 0
+let stateSavePending = false
+let stateSaveTimer = 0
+let drawerAutoCloseTimer = 0
 let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
@@ -451,7 +469,6 @@ Component({
     orbPressed: false,
     drawerOpen: false,
     statEnergy: 80,
-    statBoredom: 20,
     statAffection: 50,
     relationshipIcon: '🔥',
     relationshipText: '连续1天',
@@ -471,15 +488,21 @@ Component({
     detached() {
       this.stopAlphaVideo()
       this.releasePetVideoCanvas()
+      this.stopSoulTick()
     },
   },
 
   pageLifetimes: {
     show() {
+      petState = soulApplyEvent(petState, 'user_returned')
       this.startPetRenderer()
+      this.startSoulTick()
+      this.syncPanelUI()
     },
     hide() {
       this.stopAlphaVideo()
+      this.stopSoulTick()
+      this.savePetState()
     },
   },
 
@@ -638,10 +661,19 @@ Component({
         return
       }
 
-      if (petVideoGl && petVideoProgram && activePetVideoUrl) {
+      if (petVideoGl && petVideoProgram) {
         petVideoRenderPaused = false
-        this.startAlphaVideo(activePetVideoUrl)
-        this.startPetAudio()
+        if (petManifestActions.length > 0) {
+          petSceneQueue = buildQueue(petState, null)
+          const result = advanceQueue(petState, petSceneQueue)
+          petState = result.state
+          petSceneQueue = result.queue
+          this.playScene(result.next)
+        } else if (activePetVideoUrl) {
+          this.startAlphaVideo(activePetVideoUrl)
+          this.startPetAudio()
+        }
+        this.syncPanelUI()
       }
     },
 
@@ -691,13 +723,7 @@ Component({
         })
         decoder.on('ended', () => {
           if (petVideoDecoder !== decoder) return
-          if (petVideoPlaylist.length > 1) {
-            petVideoPlaylistIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
-            const next = petVideoPlaylist[petVideoPlaylistIndex]
-            this.playNextInPlaylist(next)
-          } else {
-            try { decoder.seek(0) } catch {}
-          }
+          this.onSceneEnded()
         })
         const startResult = decoder.start({ source, mode: 0 })
         petVideoStartTimer = Number(
@@ -765,15 +791,39 @@ Component({
       }
     },
 
-    async prepareNextDecoder() {
-      if (petVideoPlaylist.length <= 1) return
+    onSceneEnded() {
+      const result = advanceQueue(petState, petSceneQueue)
+      petState = result.state
+      petSceneQueue = result.queue
+      this.playScene(result.next)
+      this.syncPanelUI()
+    },
 
-      const nextIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
-      const nextItem = petVideoPlaylist[nextIndex]
-      if (!nextItem.videoUrl) return
+    playScene(sceneId: string) {
+      const action = petManifestActions.find((a) => a.id === sceneId)
+      if (action && action.videoUrls && action.videoUrls.length) {
+        const videoUrl = action.videoUrls[Math.floor(Math.random() * action.videoUrls.length)]
+        const audioUrl = action.audioUrl || ''
+        this.playNextInPlaylist({ videoUrl, audioUrl })
+        return
+      }
+      if (petVideoDecoder) {
+        try { petVideoDecoder.seek(0) } catch {}
+      } else if (activePetVideoUrl) {
+        this.startAlphaVideo(activePetVideoUrl)
+      }
+    },
+
+    async prepareNextDecoder() {
+      const nextScene = petSceneQueue.length > 0 ? petSceneQueue[0] : 'idle'
+      const action = petManifestActions.find((a) => a.id === nextScene)
+      if (!action || !action.videoUrls || !action.videoUrls.length) return
+
+      const videoUrl = action.videoUrls[Math.floor(Math.random() * action.videoUrls.length)]
+      if (!videoUrl) return
 
       try {
-        const source = await this.resolveVideoSource(nextItem.videoUrl)
+        const source = await this.resolveVideoSource(videoUrl)
         if (petVideoNextDecoder) {
           try { petVideoNextDecoder.stop(); petVideoNextDecoder.remove() } catch {}
         }
@@ -784,7 +834,7 @@ Component({
         decoder.on('start', () => {
           petVideoNextReady = true
         })
-        this.setupDecoderEvents(decoder, nextItem.videoUrl)
+        this.setupDecoderEvents(decoder, videoUrl)
         decoder.start({ source, mode: 0 })
         petVideoNextDecoder = decoder
       } catch (error) {
@@ -802,13 +852,7 @@ Component({
       })
       decoder.on('ended', () => {
         if (petVideoDecoder !== decoder) return
-        if (petVideoPlaylist.length > 1) {
-          petVideoPlaylistIndex = (petVideoPlaylistIndex + 1) % petVideoPlaylist.length
-          const next = petVideoPlaylist[petVideoPlaylistIndex]
-          this.playNextInPlaylist(next)
-        } else {
-          try { decoder.seek(0) } catch {}
-        }
+        this.onSceneEnded()
       })
     },
 
@@ -1183,8 +1227,14 @@ Component({
       bootstrapConfig = config
       this.setData({ ...buildPageData(config), configReady: true })
       this.resolveHomeMedia(config)
+      this.initSoul(config.defaultPetId)
+    },
+
+    async initSoul(petId: string) {
+      await this.fetchPetManifest(petId)
+      await this.loadPetState()
       this.startPetRenderer()
-      this.fetchPetManifest(config.defaultPetId)
+      this.startSoulTick()
     },
 
     async fetchBootstrapConfig() {
@@ -1225,25 +1275,87 @@ Component({
         if (!response.result || (response.result as Record<string, unknown>).ok === false) return
 
         const manifest = normalizePetManifest((response.result as Record<string, unknown>).data)
-        const playlist: Array<{ videoUrl: string; audioUrl: string }> = []
-
-        for (const action of manifest.actions) {
-          if (Array.isArray(action.videoUrls)) {
-            for (const url of action.videoUrls) {
-              if (url) playlist.push({ videoUrl: url, audioUrl: action.audioUrl || '' })
-            }
-          }
-        }
-
-        if (playlist.length > 0) {
-          petVideoPlaylist = playlist
-          petVideoPlaylistIndex = 0
-          console.info('[index] pet video playlist loaded:', { petId, count: playlist.length })
-          this.prepareNextDecoder()
-        }
+        petManifestActions = manifest.actions
+        console.info('[index] pet manifest loaded:', { petId, actions: manifest.actions.map((a) => a.id) })
       } catch (error) {
         console.warn('[index] fetchPetManifest failed:', error)
       }
+    },
+
+    async loadPetState() {
+      if (!wx.cloud) return
+
+      try {
+        const response = await wx.cloud.callFunction({ name: 'petState', data: { action: 'get' } })
+        const result = response.result as Record<string, unknown> | undefined
+        if (result && result.ok && result.data) {
+          const saved = result.data as Partial<PetState>
+          petState = { ...createDefaultState(), ...saved }
+          const elapsed = (Date.now() - (petState.updatedAt || Date.now())) / 1000
+          if (elapsed > 0) petState = soulTick(petState, elapsed)
+          petState = updateConsecutiveDays(petState)
+          console.info('[index] pet state loaded:', { energy: petState.energy, mood: petState.mood, days: petState.consecutiveDays })
+        }
+      } catch (error) {
+        console.warn('[index] loadPetState failed:', error)
+      }
+      this.syncPanelUI()
+    },
+
+    savePetState() {
+      if (stateSavePending) return
+      stateSavePending = true
+      if (stateSaveTimer) clearTimeout(stateSaveTimer)
+      stateSaveTimer = Number(setTimeout(() => {
+        stateSavePending = false
+        stateSaveTimer = 0
+        if (!wx.cloud) return
+        wx.cloud.callFunction({ name: 'petState', data: { action: 'save', state: petState } }).catch(() => undefined)
+      }, 10000))
+    },
+
+    startSoulTick() {
+      if (soulTickTimer) clearInterval(soulTickTimer)
+      soulTickTimer = Number(setInterval(() => {
+        const prevMood = petState.mood
+        petState = soulTick(petState, 30)
+
+        if (petState.mood === '疲倦' && prevMood !== '疲倦' && petState.currentScene !== 'sleep-loop' && petState.currentScene !== 'sleep-enter') {
+          const result = soulHandleEvent('energy_low', petState, petSceneQueue)
+          petState = result.state
+          petSceneQueue = result.queue
+          this.prepareNextDecoder()
+        }
+
+        if (petState.energy >= 80 && petState.currentScene === 'sleep-loop') {
+          const result = soulHandleEvent('energy_full', petState, petSceneQueue)
+          petState = result.state
+          petSceneQueue = result.queue
+          this.prepareNextDecoder()
+        }
+
+        this.syncPanelUI()
+        this.savePetState()
+      }, 30000))
+    },
+
+    stopSoulTick() {
+      if (soulTickTimer) {
+        clearInterval(soulTickTimer)
+        soulTickTimer = 0
+      }
+    },
+
+    syncPanelUI() {
+      const rel = computeRelationship(petState.consecutiveDays)
+      this.setData({
+        statEnergy: Math.round(petState.energy),
+        statAffection: Math.round(petState.affection),
+        moodIcon: moodToIcon(petState.mood),
+        moodText: petState.mood,
+        relationshipIcon: rel.icon,
+        relationshipText: rel.text,
+      })
     },
 
     async resolveHomeMedia(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
@@ -1295,7 +1407,15 @@ Component({
     },
 
     toggleDrawer() {
-      this.setData({ drawerOpen: !this.data.drawerOpen })
+      const opening = !this.data.drawerOpen
+      this.setData({ drawerOpen: opening })
+      if (drawerAutoCloseTimer) { clearTimeout(drawerAutoCloseTimer); drawerAutoCloseTimer = 0 }
+      if (opening) {
+        drawerAutoCloseTimer = Number(setTimeout(() => {
+          drawerAutoCloseTimer = 0
+          this.setData({ drawerOpen: false })
+        }, 3000))
+      }
     },
 
     backHome() {
@@ -1324,8 +1444,9 @@ Component({
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
       activePetAudioUrl = (selected && selected.audioUrl) || ''
-      petVideoPlaylist = []
-      petVideoPlaylistIndex = 0
+      petManifestActions = []
+      petSceneQueue = []
+      petState = { ...petState, currentScene: 'idle', sleepLoopCount: 0, sleepTargetLoops: 0 }
       this.fetchPetManifest(selected.id)
       this.enterHomePage({
         petName: selected.name,
@@ -1351,6 +1472,11 @@ Component({
       if (this.data.voiceStatus === 'uploading' || this.data.voiceStatus === 'transcribing' || this.data.voiceStatus === 'thinking') return
 
       this.setData({ orbPressed: true })
+      const result = soulHandleEvent('user_speak', petState, petSceneQueue)
+      petState = result.state
+      petSceneQueue = result.queue
+      this.syncPanelUI()
+      this.prepareNextDecoder()
 
       if (!recorder) {
         this.initRecorder()
@@ -1668,6 +1794,13 @@ Component({
           data: {
             text,
             petId: selected.id,
+            petState: {
+              energy: Math.round(petState.energy),
+              affection: Math.round(petState.affection),
+              mood: petState.mood,
+              relationship: this.data.relationshipText,
+              timeOfDay: getTimeOfDay(),
+            },
           },
         })
 
@@ -1683,12 +1816,21 @@ Component({
         }
 
         const reply = response.result.data && response.result.data.reply ? response.result.data.reply : '我听到啦。'
+        const nextAction = response.result.data && response.result.data.nextAction ? response.result.data.nextAction : 'idle'
+        const emotion = response.result.data && response.result.data.emotion ? response.result.data.emotion : ''
 
         this.setData({
           voiceStatus: 'success',
           voiceHint: response.result.meta && response.result.meta.fallback ? '小团子先轻轻回应你' : '小团子回应你',
           petReply: reply,
         })
+        petState = soulApplyEvent(petState, 'ai_replied')
+        if (emotion) {
+          const moodMap: Record<string, string> = { happy: '开心', curious: '好奇', gentle: '温柔', sleepy: '困了', excited: '兴奋' }
+          petState = setMood(petState, moodMap[emotion] || '开心')
+        }
+        this.applyAiNextAction(nextAction)
+        this.syncPanelUI()
       } catch (error) {
         console.warn('[index] ai response failed:', error)
         this.setData({
@@ -1696,6 +1838,24 @@ Component({
           voiceHint: '小团子听到了',
           petReply: '我听到啦，先陪你待一会儿。',
         })
+        petState = soulApplyEvent(petState, 'ai_replied')
+        this.syncPanelUI()
+      }
+    },
+
+    applyAiNextAction(nextAction: string) {
+      if (!nextAction || nextAction === 'idle') return
+
+      if (nextAction === 'sleep-enter') {
+        const result = soulHandleEvent('energy_low', petState, petSceneQueue)
+        petState = result.state
+        petSceneQueue = result.queue
+        this.prepareNextDecoder()
+      } else if (nextAction === 'listening') {
+        const result = soulHandleEvent('user_speak', petState, petSceneQueue)
+        petState = result.state
+        petSceneQueue = result.queue
+        this.prepareNextDecoder()
       }
     },
 

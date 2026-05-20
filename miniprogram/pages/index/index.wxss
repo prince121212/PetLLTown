@@ -172,12 +172,12 @@ button::after {
 .status-drawer .drawer-content {
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
+  gap: 8rpx;
   background: rgba(0, 0, 0, 0.55);
   border: 1rpx solid rgba(255, 255, 255, 0.08);
   border-left: none;
-  border-radius: 0 16rpx 16rpx 0;
-  padding: 16rpx 20rpx;
+  border-radius: 0 12rpx 12rpx 0;
+  padding: 8rpx 8rpx;
   backdrop-filter: blur(10px);
 }
 
@@ -198,14 +198,22 @@ button::after {
 }
 
 .drawer-settings-btn {
-  font-size: 20rpx;
+  width: 36rpx !important;
+  height: 36rpx !important;
+  min-width: 0 !important;
+  max-width: 36rpx !important;
   color: rgba(248, 251, 255, 0.8);
   background: rgba(255, 255, 255, 0.1);
   border: 1rpx solid rgba(255, 255, 255, 0.15);
-  border-radius: 8rpx;
-  padding: 6rpx 16rpx;
-  line-height: 1.4;
-  width: fit-content;
+  border-radius: 6rpx;
+  padding: 0 !important;
+  margin: 0;
+  font-size: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  overflow: hidden;
 }
 
 .drawer-stats {
@@ -227,10 +235,10 @@ button::after {
 }
 
 .drawer-stat-bar {
-  width: 80rpx;
-  height: 8rpx;
+  width: 36rpx;
+  height: 6rpx;
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 4rpx;
+  border-radius: 3rpx;
   overflow: hidden;
 }
 
@@ -241,10 +249,6 @@ button::after {
 
 .drawer-stat-fill.energy {
   background: #4ecdc4;
-}
-
-.drawer-stat-fill.boredom {
-  background: #ff6b6b;
 }
 
 .drawer-stat-fill.affection {

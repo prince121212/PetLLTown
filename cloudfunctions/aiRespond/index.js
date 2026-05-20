@@ -37,7 +37,16 @@ function fallbackReply(text) {
     return {
       reply: '我在呢，刚才那句有点轻，再靠近一点说给我听。',
       emotion: 'curious',
-      nextAction: 'listen',
+      nextAction: 'listening',
+      source: 'fallback',
+    }
+  }
+
+  if (text.includes('晚安') || text.includes('睡吧') || text.includes('休息')) {
+    return {
+      reply: '晚安~ 我也困了，陪你一起睡。',
+      emotion: 'sleepy',
+      nextAction: 'sleep-enter',
       source: 'fallback',
     }
   }
@@ -95,7 +104,8 @@ function normalizeAiPayload(payload, text) {
   const fallback = fallbackReply(text)
   const reply = clampText(payload && payload.reply, 48) || fallback.reply
   const emotion = clampText(payload && payload.emotion, 24) || fallback.emotion
-  const nextAction = ['idle', 'listen', 'happy'].includes(payload && payload.nextAction) ? payload.nextAction : fallback.nextAction
+  const validActions = ['idle', 'sleep-enter', 'listening']
+  const nextAction = validActions.includes(payload && payload.nextAction) ? payload.nextAction : fallback.nextAction
 
   return {
     reply,
@@ -124,9 +134,14 @@ function createCloudBaseApp(env) {
   })
 }
 
-async function callCloudBaseAi(text, petId, env) {
+async function callCloudBaseAi(text, petId, env, petStateInfo) {
   const app = createCloudBaseApp(env)
   const model = app.ai().createModel(PROVIDER)
+
+  const stateContext = petStateInfo
+    ? `\n当前状态：精力${petStateInfo.energy}/100，亲密度${petStateInfo.affection}/100，心情「${petStateInfo.mood}」，关系「${petStateInfo.relationship}」，时段「${petStateInfo.timeOfDay}」。根据这些状态调整你的语气和回复。精力低时表现困意，亲密度高时更撒娇。`
+    : ''
+
   const result = await model.generateText(
     {
       model: MODEL,
@@ -134,13 +149,20 @@ async function callCloudBaseAi(text, petId, env) {
         {
           role: 'system',
           content: [
-            '你是微信小程序《宠物小小镇》里的小宠物“小团子”。',
+            '你是微信小程序《宠物小小镇》里的小宠物。',
             '你会认真听用户说话，回复必须短、亲近、有生命感，像一只陪伴型小宠物。',
             '只输出 JSON，不要输出 Markdown，不要解释。',
             'JSON 字段：reply 字符串，emotion 字符串，nextAction 字符串。',
             'reply 不超过 24 个中文字符。',
-            'emotion 只能表达温和的情绪，例如 happy、curious、gentle、sleepy。',
-            'nextAction 只能是 idle、listen、happy 之一。',
+            'emotion 表达你的情绪：happy、curious、gentle、sleepy、excited。',
+            'nextAction 决定你回复后的动作，只能是以下之一：',
+            '  idle — 回到日常待机（默认，大部分情况用这个）',
+            '  sleep-enter — 去睡觉（用户说晚安、说累了、说让你休息时）',
+            '  listening — 继续倾听（用户话没说完、你想让用户继续说时）',
+            '根据用户说的内容智能选择 nextAction，不要总是 idle。',
+            '如果用户说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
+            '如果用户的话像是没说完或者你想追问，nextAction 用 listening。',
+            stateContext,
           ].join('\n'),
         },
         {
@@ -218,7 +240,7 @@ exports.main = async (event = {}, context = {}) => {
   }
 
   try {
-    const aiResult = await callCloudBaseAi(text, petId, env)
+    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null)
     const data = {
       reply: aiResult.reply,
       emotion: aiResult.emotion,

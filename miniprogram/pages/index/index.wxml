@@ -25,15 +25,11 @@
 
       <view class="status-drawer {{drawerOpen ? 'open' : 'closed'}}">
         <view class="drawer-content">
-          <button class="drawer-settings-btn" bindtap="openSettings">⚙ 设置</button>
+          <button class="drawer-settings-btn" bindtap="openSettings">⚙</button>
           <view class="drawer-stats">
             <view class="drawer-stat-row">
               <text class="drawer-stat-icon">⚡</text>
               <view class="drawer-stat-bar"><view class="drawer-stat-fill energy" style="width:{{statEnergy}}%"></view></view>
-            </view>
-            <view class="drawer-stat-row">
-              <text class="drawer-stat-icon">💭</text>
-              <view class="drawer-stat-bar"><view class="drawer-stat-fill boredom" style="width:{{statBoredom}}%"></view></view>
             </view>
             <view class="drawer-stat-row">
               <text class="drawer-stat-icon">💛</text>
