@@ -105,11 +105,11 @@ exports.main = async (event = {}) => {
         messages: [
           {
             role: 'system',
-            content: `你是一个用户画像生成器。根据用户的记忆列表，生成一段简洁的用户画像，不超过 ${aiMemoryConfig.portraitMaxLength} 字。要求：合并同一实体的信息，去除过时信息，保留最新状态，语言简洁像人物档案。只输出画像文本，不要解释。`,
+            content: `你是一个主人画像生成器。根据主人的记忆列表，生成一段简洁的主人画像，不超过 ${aiMemoryConfig.portraitMaxLength} 字。要求：合并同一实体的信息，去除过时信息，保留最新状态，语言简洁像人物档案。只输出画像文本，不要解释。所有描述都要使用“主人”视角。`,
           },
           {
             role: 'user',
-            content: `当前画像：${oldPortrait || '（空）'}\n\n近期记忆：\n${memoryList}\n\n输出新画像：`,
+            content: `当前画像：${oldPortrait || '（空）'}\n\n近期记忆：\n${memoryList}\n\n输出新的主人画像：`,
           },
         ],
         temperature: 0.5,

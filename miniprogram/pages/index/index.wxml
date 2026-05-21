@@ -92,7 +92,7 @@
         </view>
       </view>
       <view class="debug-section">
-        <text class="debug-title">用户画像</text>
+        <text class="debug-title">主人画像</text>
         <text class="debug-text">{{debugPortrait || '（空）'}}</text>
       </view>
       <view class="debug-section">

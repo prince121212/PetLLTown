@@ -130,9 +130,13 @@ function normalizeMemory(memory, source) {
   const content = clampText(memory.content, 30)
   if (!content) return null
 
+  const normalizedContent = content
+    .replace(/^用户/, '主人')
+    .replace(/^我的?用户/, '主人')
+
   return {
     ...memory,
-    content,
+    content: normalizedContent,
     importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
     source: source || memory.source || 'ai',
   }
@@ -501,7 +505,7 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, ch
           role: 'system',
           content: [
             '你是微信小程序《宠物小小镇》里的小宠物。',
-            '你会认真听用户说话，回复必须短、亲近、有生命感，像一只陪伴型小宠物。',
+            '你会认真听主人说话，回复必须短、亲近、有生命感，像一只陪伴型小宠物。',
             '只输出 JSON，不要输出 Markdown，不要解释。',
             'JSON 字段：reply 字符串，emotion 字符串，nextAction 字符串，memory 对象（可选）。',
             'reply 不超过 24 个中文字符。',
@@ -511,10 +515,11 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, ch
             '  sleep-enter — 去睡觉（用户说晚安、说累了、说让你休息时）',
             '  listening — 继续倾听（用户话没说完、你想让用户继续说时）',
             '根据用户说的内容智能选择 nextAction，不要总是 idle。',
-            '如果用户说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
-            '如果用户的话像是没说完或者你想追问，nextAction 用 listening。',
+            '如果主人说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
+            '如果主人的话像是没说完或者你想追问，nextAction 用 listening。',
             '',
-            'memory 字段规则：如果用户这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","importance":0到1的重要性}。长期偏好和核心事实给0.7-0.9，临时情绪和近期计划给0.3-0.5。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
+            'memory 字段规则：如果主人这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","importance":0到1的重要性}。长期偏好和核心事实给0.7-0.9，临时情绪和近期计划给0.3-0.5。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
+            '记忆内容必须使用“主人”视角，例如“主人最喜欢粉色”“主人喜欢打篮球”，不要写成“用户最喜欢…”。',
             stateContext,
             memoryContext,
           ].join('\n'),
@@ -556,7 +561,7 @@ async function extractMemoryWithAi(text, env, petStateInfo, chatHistory) {
     : ''
 
   const historyContext = Array.isArray(chatHistory) && chatHistory.length
-    ? `\n最近对话：\n${chatHistory.slice(-4).map((turn) => `用户：${turn.user || ''}\n宠物：${turn.pet || ''}`).join('\n')}`
+    ? `\n最近对话：\n${chatHistory.slice(-4).map((turn) => `主人：${turn.user || ''}\n宠物：${turn.pet || ''}`).join('\n')}`
     : ''
 
   const result = await model.generateText(
@@ -567,19 +572,20 @@ async function extractMemoryWithAi(text, env, petStateInfo, chatHistory) {
           role: 'system',
           content: [
             '你是《宠物小小镇》的记忆提取器。',
-            '你的任务只有一个：判断用户刚刚说的话里，是否有值得长期记住的信息。',
+            '你的任务只有一个：判断主人刚刚说的话里，是否有值得长期记住的信息。',
             '不要写回复，不要解释，不要分析过程。',
             '只输出 JSON，字段只有 memory。',
             'memory 为 null，或者为对象 {"content":"不超过20字的概括","importance":0到1之间的数字}。',
             '值得记住的内容包括：稳定偏好、身份、习惯、长期关系、明确计划、持续性的情绪状态。',
             '不值得记住的内容包括：打招呼、客套话、临时闲聊、单次感叹、没有信息量的重复。',
-            '如果用户说“我最喜欢打篮球”，应该记为喜欢打篮球这一类稳定偏好。',
+            '如果主人说“我最喜欢打篮球”，应该记为“主人喜欢打篮球”这一类稳定偏好。',
+            '记忆内容也要默认使用“主人”视角。',
           ].join('\n'),
         },
         {
           role: 'user',
           content: [
-            `用户刚刚说：${text}`,
+            `主人刚刚说：${text}`,
             stateContext,
             historyContext,
             '请只返回 JSON。',
@@ -665,9 +671,10 @@ exports.main = async (event = {}, context = {}) => {
     let memoryContext = ''
     if (portraitText || memories.length) {
       const parts = []
-      if (portraitText) parts.push(`用户画像：${portraitText}`)
+      if (portraitText) parts.push(`主人画像：${portraitText}`)
       if (memories.length) parts.push(`近期记忆：\n${memories.map((m) => `- ${m.content}`).join('\n')}`)
-      parts.push('回复时自然地体现你了解这个用户，但不要刻意复述。')
+      parts.push('回复时自然地体现你了解这位主人，但不要刻意复述。')
+      parts.push('所有偏好、身份、习惯类表述都要默认换成“主人”视角。')
       memoryContext = '\n' + parts.join('\n')
     }
 

@@ -398,6 +398,7 @@ function buildPageData(config = bootstrapConfig): Partial<PageData> {
   return {
     appName: config.appName,
     petName,
+    voiceHint: buildIdleVoiceHint(petName),
     homeHint: config.homeHint,
     backgroundMediaKind: activeRoom ? activeRoom.kind : 'video',
     backgroundMediaUrl: activeRoom ? activeRoom.mediaUrl : config.homeMedia.backgroundVideoUrl,
@@ -459,13 +460,52 @@ function voiceErrorMessage(message: string): string {
   return message
 }
 
+function normalizePetDisplayName(name: string): string {
+  const trimmed = typeof name === 'string' ? name.trim() : ''
+  return trimmed || '宠物'
+}
+
+function buildIdleVoiceHint(name: string): string {
+  return `按住和${normalizePetDisplayName(name)}说话`
+}
+
+function buildListeningVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}在听`
+}
+
+function buildThinkingVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}在想怎么回答`
+}
+
+function buildUploadingVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}在接收你的声音`
+}
+
+function buildTranscribingVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}在认真听`
+}
+
+function buildHeardVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}听到了`
+}
+
+function buildRespondingVoiceHint(name: string, fallback = false): string {
+  return fallback
+    ? `${normalizePetDisplayName(name)}先轻轻回应你`
+    : `${normalizePetDisplayName(name)}回应你`
+}
+
+function buildHeardSoundVoiceHint(name: string): string {
+  return `${normalizePetDisplayName(name)}听见了声音`
+}
+
 Component({
   data: {
-    pageName: 'home',
-    configReady: false,
-    appName: FALLBACK_BOOTSTRAP_CONFIG.appName,
-    petName: FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
-    homeHint: FALLBACK_BOOTSTRAP_CONFIG.homeHint,
+  pageName: 'home',
+  configReady: false,
+  appName: FALLBACK_BOOTSTRAP_CONFIG.appName,
+  petName: FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
+  homeHint: FALLBACK_BOOTSTRAP_CONFIG.homeHint,
     pageShellStyle: '',
     homeTopStyle: '',
     homeStageStyle: '',
@@ -481,7 +521,7 @@ Component({
     settings: FALLBACK_BOOTSTRAP_CONFIG.settings.items,
     miniAd: FALLBACK_BOOTSTRAP_CONFIG.settings.miniAd,
     voiceStatus: 'idle',
-    voiceHint: '按住和小团子说话',
+    voiceHint: buildIdleVoiceHint(FALLBACK_BOOTSTRAP_CONFIG.defaultPetName),
     transcribedText: '',
     petReply: '',
     orbPressed: false,
@@ -574,12 +614,12 @@ Component({
       recorder.onStart(() => {
         recordingStartedAt = Date.now()
         console.info('[index] recorder start')
-        this.setData({
-          voiceStatus: 'recording',
-          voiceHint: '松开就发给小团子',
-          transcribedText: '',
-          petReply: '',
-        })
+      this.setData({
+        voiceStatus: 'recording',
+          voiceHint: buildListeningVoiceHint(this.data.petName),
+        transcribedText: '',
+        petReply: '',
+      })
       })
       recorder.onStop((result) => {
         if (stopFallbackTimer) {
@@ -1537,7 +1577,8 @@ Component({
       await this.loadPetState(selected.id)
 
       this.enterHomePage({
-        petName: selected.name,
+        petName: normalizePetDisplayName(selected.name),
+        voiceHint: buildIdleVoiceHint(selected.name),
         settingsThumb: (selected && selected.thumbUrl) || '',
       })
     },
@@ -1651,7 +1692,7 @@ Component({
 
         this.setData({
           voiceStatus: 'thinking',
-          voiceHint: '小团子在想怎么回答',
+          voiceHint: buildThinkingVoiceHint(this.data.petName),
           transcribedText: text,
           petReply: '',
         })
@@ -1682,7 +1723,7 @@ Component({
         })
         this.setData({
           voiceStatus: 'uploading',
-          voiceHint: '小团子在接收你的声音',
+          voiceHint: buildUploadingVoiceHint(this.data.petName),
           transcribedText: '',
           petReply: '',
         })
@@ -1694,7 +1735,7 @@ Component({
 
         this.setData({
           voiceStatus: 'transcribing',
-          voiceHint: '小团子在认真听',
+          voiceHint: buildTranscribingVoiceHint(this.data.petName),
         })
 
         const response = await wx.cloud.callFunction({
@@ -1717,7 +1758,7 @@ Component({
 
         this.setData({
           voiceStatus: text ? 'thinking' : 'success',
-          voiceHint: text ? '小团子在想怎么回答' : '小团子听见了声音',
+          voiceHint: text ? buildThinkingVoiceHint(this.data.petName) : buildHeardSoundVoiceHint(this.data.petName),
           transcribedText: text || '刚才这句有点轻',
         })
 
@@ -1876,7 +1917,7 @@ Component({
         }
 
         this.setData({
-          voiceHint: '小团子正在听',
+          voiceHint: buildListeningVoiceHint(this.data.petName),
           transcribedText: asrFinalText || text,
         })
       } catch (error) {
@@ -1913,7 +1954,7 @@ Component({
 
           this.setData({
             voiceStatus: 'success',
-            voiceHint: '小团子听到了',
+            voiceHint: buildHeardVoiceHint(selected.name),
             petReply: message || '我听到啦，先陪你待一会儿。',
           })
           return
@@ -1938,7 +1979,7 @@ Component({
 
         this.setData({
           voiceStatus: 'success',
-          voiceHint: (meta && meta.fallback) ? '小团子先轻轻回应你' : '小团子回应你',
+          voiceHint: buildRespondingVoiceHint(selected.name, Boolean(meta && meta.fallback)),
           petReply: reply,
         })
         petState = soulApplyEvent(petState, 'ai_replied')
@@ -1954,7 +1995,7 @@ Component({
         console.warn('[index] ai response failed:', error)
         this.setData({
           voiceStatus: 'success',
-          voiceHint: '小团子听到了',
+          voiceHint: buildHeardVoiceHint(this.data.petName),
           petReply: '我听到啦，先陪你待一会儿。',
         })
         petState = soulApplyEvent(petState, 'ai_replied')
@@ -1998,7 +2039,7 @@ Component({
         return '录音启动超时，换真机试一下'
       }
 
-      return '没有听清，再试一次'
+      return `${normalizePetDisplayName(this.data.petName)}没听清，再试一次`
     },
 
     formatCloudError(error: unknown): string {
@@ -2008,7 +2049,7 @@ Component({
         return '网络有点慢，再试一次'
       }
 
-      return '小团子刚刚走神了，再试一次'
+      return `${normalizePetDisplayName(this.data.petName)}刚刚走神了，再试一次`
     },
 
     startPetAudio() {
