@@ -81,6 +81,27 @@
         </view>
       </view>
     </view>
+
+    <!-- 右侧调试面板 -->
+    <view class="debug-toggle" bindtap="toggleDebug">{{debugOpen ? '✕' : '🔍'}}</view>
+    <view wx:if="{{debugOpen}}" class="debug-panel">
+      <view class="debug-section">
+        <text class="debug-title">播放队列</text>
+        <view class="debug-queue">
+          <text wx:for="{{debugQueue}}" wx:key="*this" class="debug-queue-item {{index === 0 ? 'active' : ''}}">{{item}}</text>
+        </view>
+      </view>
+      <view class="debug-section">
+        <text class="debug-title">用户画像</text>
+        <text class="debug-text">{{debugPortrait || '（空）'}}</text>
+      </view>
+      <view class="debug-section">
+        <text class="debug-title">短期记忆 ({{debugMemories.length}})</text>
+        <view class="debug-memories">
+          <text wx:for="{{debugMemories}}" wx:key="*this" class="debug-memory-item">{{item}}</text>
+        </view>
+      </view>
+    </view>
   </view>
 
   <view wx:if="{{pageName === 'settings'}}" class="page settings-page">

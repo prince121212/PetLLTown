@@ -107,10 +107,18 @@ function normalizeAiPayload(payload, text) {
   const validActions = ['idle', 'sleep-enter', 'listening']
   const nextAction = validActions.includes(payload && payload.nextAction) ? payload.nextAction : fallback.nextAction
 
+  let memory = null
+  if (payload && payload.memory && typeof payload.memory === 'object') {
+    const content = clampText(payload.memory.content, 30)
+    const entity = clampText(payload.memory.entity, 10)
+    if (content) memory = { content, entity: entity || '' }
+  }
+
   return {
     reply,
     emotion,
     nextAction,
+    memory,
     source: 'ai',
   }
 }
@@ -128,13 +136,114 @@ async function writeAiLog(log) {
   }
 }
 
+const MEMORIES_COLLECTION = 'user_memories'
+const PROFILES_COLLECTION = 'user_profiles'
+const MAX_MEMORIES = 15
+
+async function loadMemories(openId) {
+  try {
+    const result = await db.collection(MEMORIES_COLLECTION)
+      .where({ _openId: openId })
+      .orderBy('importance', 'desc')
+      .limit(MAX_MEMORIES)
+      .get()
+    return result.data || []
+  } catch {
+    return []
+  }
+}
+
+async function loadPortrait(openId) {
+  try {
+    const result = await db.collection(PROFILES_COLLECTION).doc(openId).get()
+    return result.data || null
+  } catch {
+    return null
+  }
+}
+
+async function writeMemory(openId, memory) {
+  if (!memory || !memory.content) return
+
+  const existing = await loadMemories(openId)
+
+  if (memory.entity) {
+    const match = existing.find((m) => m.entity && m.entity === memory.entity)
+    if (match) {
+      await db.collection(MEMORIES_COLLECTION).doc(match._id).update({
+        data: { content: memory.content, createdAt: now(), importance: Math.max(match.importance || 0.4, computeImportance(memory.content)) },
+      })
+      return
+    }
+  }
+
+  if (existing.length >= MAX_MEMORIES) {
+    const lowest = existing[existing.length - 1]
+    if (lowest && lowest._id) {
+      await db.collection(MEMORIES_COLLECTION).doc(lowest._id).remove()
+    }
+  }
+
+  await db.collection(MEMORIES_COLLECTION).add({
+    data: {
+      _openId: openId,
+      content: memory.content,
+      entity: memory.entity || '',
+      importance: computeImportance(memory.content),
+      createdAt: now(),
+    },
+  })
+
+  await checkPortraitUpdate(openId)
+}
+
+function computeImportance(content) {
+  let score = 0.4
+  if (/喜欢|讨厌|最爱|不喜欢|爱吃/.test(content)) score += 0.2
+  if (/难过|生气|想哭|幸福|开心|焦虑/.test(content)) score += 0.2
+  if (/叫|名|岁|工作|家|养了|住在/.test(content)) score += 0.15
+  return Math.min(score, 1.0)
+}
+
+async function checkPortraitUpdate(openId) {
+  try {
+    let profile = await loadPortrait(openId)
+    if (!profile) {
+      try {
+        await db.collection(PROFILES_COLLECTION).doc(openId).set({
+          data: { _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
+        })
+      } catch {
+        await db.collection(PROFILES_COLLECTION).add({
+          data: { _id: openId, _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
+        })
+      }
+      return
+    }
+
+    const count = (profile.memoryCountSinceUpdate || 0) + 1
+    if (count >= 5) {
+      await db.collection(PROFILES_COLLECTION).doc(openId).update({
+        data: { memoryCountSinceUpdate: 0, _needsPortraitUpdate: true },
+      })
+      cloud.callFunction({ name: 'updatePortrait', data: {} }).catch(() => undefined)
+    } else {
+      await db.collection(PROFILES_COLLECTION).doc(openId).update({
+        data: { memoryCountSinceUpdate: count },
+      })
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function createCloudBaseApp(env) {
   return cloudbase.init({
     env,
   })
 }
 
-async function callCloudBaseAi(text, petId, env, petStateInfo) {
+async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext) {
   const app = createCloudBaseApp(env)
   const model = app.ai().createModel(PROVIDER)
 
@@ -152,7 +261,7 @@ async function callCloudBaseAi(text, petId, env, petStateInfo) {
             '你是微信小程序《宠物小小镇》里的小宠物。',
             '你会认真听用户说话，回复必须短、亲近、有生命感，像一只陪伴型小宠物。',
             '只输出 JSON，不要输出 Markdown，不要解释。',
-            'JSON 字段：reply 字符串，emotion 字符串，nextAction 字符串。',
+            'JSON 字段：reply 字符串，emotion 字符串，nextAction 字符串，memory 对象（可选）。',
             'reply 不超过 24 个中文字符。',
             'emotion 表达你的情绪：happy、curious、gentle、sleepy、excited。',
             'nextAction 决定你回复后的动作，只能是以下之一：',
@@ -162,7 +271,10 @@ async function callCloudBaseAi(text, petId, env, petStateInfo) {
             '根据用户说的内容智能选择 nextAction，不要总是 idle。',
             '如果用户说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
             '如果用户的话像是没说完或者你想追问，nextAction 用 listening。',
+            '',
+            'memory 字段规则：如果用户这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","entity":"相关实体名"}。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
             stateContext,
+            memoryContext,
           ].join('\n'),
         },
         {
@@ -174,7 +286,7 @@ async function callCloudBaseAi(text, petId, env, petStateInfo) {
         },
       ],
       temperature: 0.8,
-      max_tokens: 120,
+      max_tokens: 180,
     },
     {
       timeout: 12000,
@@ -240,12 +352,30 @@ exports.main = async (event = {}, context = {}) => {
   }
 
   try {
-    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null)
+    const openId = wxContext.OPENID || ''
+    const memories = openId ? await loadMemories(openId) : []
+    const profile = openId ? await loadPortrait(openId) : null
+    const portraitText = profile && profile.portrait ? profile.portrait : ''
+
+    let memoryContext = ''
+    if (portraitText || memories.length) {
+      const parts = []
+      if (portraitText) parts.push(`用户画像：${portraitText}`)
+      if (memories.length) parts.push(`近期记忆：\n${memories.map((m) => `- ${m.content}`).join('\n')}`)
+      parts.push('回复时自然地体现你了解这个用户，但不要刻意复述。')
+      memoryContext = '\n' + parts.join('\n')
+    }
+
+    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null, memoryContext)
     const data = {
       reply: aiResult.reply,
       emotion: aiResult.emotion,
       nextAction: aiResult.nextAction,
       source: aiResult.source,
+    }
+
+    if (aiResult.memory && openId) {
+      writeMemory(openId, aiResult.memory).catch(() => undefined)
     }
 
     await writeAiLog({
@@ -264,6 +394,9 @@ exports.main = async (event = {}, context = {}) => {
       meta: {
         model: MODEL,
         provider: PROVIDER,
+        memories: memories.map((m) => m.content),
+        portrait: portraitText,
+        newMemory: aiResult.memory || null,
       },
     }
   } catch (error) {

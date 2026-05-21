@@ -61,6 +61,10 @@ interface PageData {
   relationshipText: string
   moodIcon: string
   moodText: string
+  debugMemories: string[]
+  debugPortrait: string
+  debugQueue: string[]
+  debugOpen: boolean
   activePetIndex: number
   activeRoomIndex: number
 }
@@ -283,6 +287,7 @@ let activePetAudioUrl = ''
 let petState: PetState = createDefaultState()
 let petSceneQueue: string[] = []
 let petManifestActions: PetAction[] = []
+let activePetId = ''
 let soulTickTimer = 0
 let stateSavePending = false
 let stateSaveTimer = 0
@@ -474,6 +479,10 @@ Component({
     relationshipText: '连续1天',
     moodIcon: '😊',
     moodText: '开心',
+    debugMemories: [] as string[],
+    debugPortrait: '',
+    debugQueue: [] as string[],
+    debugOpen: false,
     activePetIndex: 0,
     activeRoomIndex: Math.max(0, FALLBACK_BOOTSTRAP_CONFIG.rooms.findIndex((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId)),
   } as PageData,
@@ -502,7 +511,7 @@ Component({
     hide() {
       this.stopAlphaVideo()
       this.stopSoulTick()
-      this.savePetState()
+      this.savePetStateNow()
     },
   },
 
@@ -1227,12 +1236,14 @@ Component({
       bootstrapConfig = config
       this.setData({ ...buildPageData(config), configReady: true })
       this.resolveHomeMedia(config)
-      this.initSoul(config.defaultPetId)
+      this.initSoul(config)
     },
 
-    async initSoul(petId: string) {
-      await this.fetchPetManifest(petId)
-      await this.loadPetState()
+    async initSoul(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
+      const prefs = await this.loadUserPrefs()
+      activePetId = prefs.activePetId || config.defaultPetId
+      await this.fetchPetManifest(activePetId)
+      await this.loadPetState(activePetId)
       this.startPetRenderer()
       this.startSoulTick()
     },
@@ -1282,19 +1293,43 @@ Component({
       }
     },
 
-    async loadPetState() {
+    async loadUserPrefs(): Promise<{ activePetId: string }> {
+      if (!wx.cloud) return { activePetId: '' }
+
+      try {
+        const response = await wx.cloud.callFunction({ name: 'petState', data: { action: 'getPrefs' } })
+        const result = response.result as Record<string, unknown> | undefined
+        if (result && result.ok && result.data) {
+          const prefs = result.data as Record<string, unknown>
+          return { activePetId: typeof prefs.activePetId === 'string' ? prefs.activePetId : '' }
+        }
+      } catch (error) {
+        console.warn('[index] loadUserPrefs failed:', error)
+      }
+      return { activePetId: '' }
+    },
+
+    saveUserPrefs() {
+      if (!wx.cloud || !activePetId) return
+      wx.cloud.callFunction({
+        name: 'petState',
+        data: { action: 'savePrefs', prefs: { activePetId } },
+      }).catch(() => undefined)
+    },
+
+    async loadPetState(petId: string) {
       if (!wx.cloud) return
 
       try {
-        const response = await wx.cloud.callFunction({ name: 'petState', data: { action: 'get' } })
+        const response = await wx.cloud.callFunction({ name: 'petState', data: { action: 'get', petId } })
         const result = response.result as Record<string, unknown> | undefined
         if (result && result.ok && result.data) {
           const saved = result.data as Partial<PetState>
           petState = { ...createDefaultState(), ...saved }
-          const elapsed = (Date.now() - (petState.updatedAt || Date.now())) / 1000
+          const elapsed = Math.min((Date.now() - (petState.updatedAt || Date.now())) / 1000, 86400)
           if (elapsed > 0) petState = soulTick(petState, elapsed)
           petState = updateConsecutiveDays(petState)
-          console.info('[index] pet state loaded:', { energy: petState.energy, mood: petState.mood, days: petState.consecutiveDays })
+          console.info('[index] pet state loaded:', { petId, energy: petState.energy, mood: petState.mood, days: petState.consecutiveDays })
         }
       } catch (error) {
         console.warn('[index] loadPetState failed:', error)
@@ -1303,14 +1338,14 @@ Component({
     },
 
     savePetState() {
-      if (stateSavePending) return
+      if (stateSavePending || !activePetId) return
       stateSavePending = true
       if (stateSaveTimer) clearTimeout(stateSaveTimer)
       stateSaveTimer = Number(setTimeout(() => {
         stateSavePending = false
         stateSaveTimer = 0
-        if (!wx.cloud) return
-        wx.cloud.callFunction({ name: 'petState', data: { action: 'save', state: petState } }).catch(() => undefined)
+        if (!wx.cloud || !activePetId) return
+        wx.cloud.callFunction({ name: 'petState', data: { action: 'save', petId: activePetId, state: petState } }).catch(() => undefined)
       }, 10000))
     },
 
@@ -1355,6 +1390,7 @@ Component({
         moodText: petState.mood,
         relationshipIcon: rel.icon,
         relationshipText: rel.text,
+        debugQueue: petSceneQueue.slice(0, 5),
       })
     },
 
@@ -1418,6 +1454,10 @@ Component({
       }
     },
 
+    toggleDebug() {
+      this.setData({ debugOpen: !this.data.debugOpen })
+    },
+
     backHome() {
       this.enterHomePage()
     },
@@ -1440,18 +1480,32 @@ Component({
       this.setData({ activeRoomIndex: event.detail.current })
     },
 
-    selectPet() {
+    async selectPet() {
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
+      if (!selected) return
+
+      this.savePetStateNow()
+
+      activePetId = selected.id
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
       activePetAudioUrl = (selected && selected.audioUrl) || ''
       petManifestActions = []
       petSceneQueue = []
-      petState = { ...petState, currentScene: 'idle', sleepLoopCount: 0, sleepTargetLoops: 0 }
-      this.fetchPetManifest(selected.id)
+      petState = createDefaultState()
+
+      this.saveUserPrefs()
+      await this.fetchPetManifest(selected.id)
+      await this.loadPetState(selected.id)
+
       this.enterHomePage({
         petName: selected.name,
         settingsThumb: (selected && selected.thumbUrl) || '',
       })
+    },
+
+    savePetStateNow() {
+      if (!wx.cloud || !activePetId) return
+      wx.cloud.callFunction({ name: 'petState', data: { action: 'save', petId: activePetId, state: petState } }).catch(() => undefined)
     },
 
     selectRoom() {
@@ -1818,10 +1872,16 @@ Component({
         const reply = response.result.data && response.result.data.reply ? response.result.data.reply : '我听到啦。'
         const nextAction = response.result.data && response.result.data.nextAction ? response.result.data.nextAction : 'idle'
         const emotion = response.result.data && response.result.data.emotion ? response.result.data.emotion : ''
+        const meta = response.result.meta as Record<string, unknown> | undefined
+
+        if (meta) {
+          if (Array.isArray(meta.memories)) this.setData({ debugMemories: meta.memories as string[] })
+          if (typeof meta.portrait === 'string') this.setData({ debugPortrait: meta.portrait as string })
+        }
 
         this.setData({
           voiceStatus: 'success',
-          voiceHint: response.result.meta && response.result.meta.fallback ? '小团子先轻轻回应你' : '小团子回应你',
+          voiceHint: (meta && meta.fallback) ? '小团子先轻轻回应你' : '小团子回应你',
           petReply: reply,
         })
         petState = soulApplyEvent(petState, 'ai_replied')
