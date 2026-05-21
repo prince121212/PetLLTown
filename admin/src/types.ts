@@ -30,6 +30,10 @@ export interface AiMemoryConfig {
   portraitMaxLength: number
 }
 
+export interface VoiceRecognitionConfig {
+  provider: 'wechat-si' | 'cloud-asr'
+}
+
 export interface SettingItem {
   id: string
   icon: string
@@ -55,6 +59,7 @@ export interface BootstrapConfig {
     listenOrbVideoUrl: string
   }
   aiMemory: AiMemoryConfig
+  voiceRecognition: VoiceRecognitionConfig
   settings: {
     items: SettingItem[]
     miniAd: {

@@ -1,4 +1,4 @@
-import { AiMemoryConfig, BootstrapConfig, PetOption, RoomOption, ValidationIssue } from './types'
+import { AiMemoryConfig, BootstrapConfig, PetOption, RoomOption, ValidationIssue, VoiceRecognitionConfig } from './types'
 
 export function cloneConfig(config: BootstrapConfig): BootstrapConfig {
   return JSON.parse(JSON.stringify(config)) as BootstrapConfig
@@ -31,6 +31,9 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
     portraitSourceMemoryLimit: 15,
     portraitMaxLength: 200,
   }
+  const fallbackVoiceRecognition: VoiceRecognitionConfig = {
+    provider: 'wechat-si',
+  }
 
   return {
     ...value,
@@ -43,6 +46,9 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
       portraitTriggerCount: toPositiveInt(value.aiMemory?.portraitTriggerCount, fallbackAiMemory.portraitTriggerCount),
       portraitSourceMemoryLimit: toPositiveInt(value.aiMemory?.portraitSourceMemoryLimit, fallbackAiMemory.portraitSourceMemoryLimit),
       portraitMaxLength: toPositiveInt(value.aiMemory?.portraitMaxLength, fallbackAiMemory.portraitMaxLength),
+    },
+    voiceRecognition: {
+      provider: value.voiceRecognition?.provider === 'cloud-asr' ? 'cloud-asr' : fallbackVoiceRecognition.provider,
     },
     settings: {
       ...fallbackSettings,
@@ -471,6 +477,12 @@ export function generateDiffSummary(
   }
   if (beforeAiMemory.portraitMaxLength !== afterAiMemory.portraitMaxLength) {
     lines.push(`画像最大字数改为 ${afterAiMemory.portraitMaxLength} 字`)
+  }
+
+  const beforeVoice = before.voiceRecognition || {}
+  const afterVoice = after.voiceRecognition || {}
+  if (beforeVoice.provider !== afterVoice.provider) {
+    lines.push(`语音识别方案改为 ${afterVoice.provider === 'wechat-si' ? '微信同声传译' : '现有云端方案'}`)
   }
 
   if (!lines.length) {

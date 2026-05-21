@@ -24,6 +24,7 @@ import {
 } from '../../utils/soulEngine'
 
 type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinking' | 'success' | 'error'
+type VoiceRecognitionProvider = 'wechat-si' | 'cloud-asr'
 
 interface PageData {
   pageName: PageName
@@ -124,6 +125,15 @@ interface AsrRealtimeSignResult {
     code?: string
     message?: string
   }
+}
+
+interface WechatSiRecognizer {
+  start: (options: { duration?: number; lang?: string }) => void
+  stop: () => void
+  onStart?: (res: { msg?: string }) => void
+  onRecognize?: (res: { result?: string }) => void
+  onStop?: (res: { tempFilePath?: string; duration?: number; fileSize?: number; result?: string }) => void
+  onError?: (res: { retcode?: number; msg?: string }) => void
 }
 
 interface RealtimeAsrMessage {
@@ -322,6 +332,8 @@ let asrFrameQueue: ArrayBuffer[] = []
 let asrFinalText = ''
 let asrRealtimeError = ''
 let asrFallbackToUpload = false
+let wechatSiManager: WechatSiRecognizer | null = null
+let wechatSiActive = false
 
 const MIN_RECORD_MS = 600
 const MAX_RECORD_MS = 60000
@@ -330,6 +342,7 @@ const RECORDER_STOP_FALLBACK_MS = 1800
 const REALTIME_FRAME_SIZE_KB = 4
 const ALPHA_VIDEO_START_TIMEOUT_MS = 5000
 const RGBA_BYTES_PER_PIXEL = 4
+const WECHAT_SI_PLUGIN_NAME = 'WechatSI'
 const ALPHA_VIDEO_VERTEX_SHADER = `
 attribute vec2 a_position;
 attribute vec2 a_texCoord;
@@ -498,6 +511,11 @@ function buildRespondingVoiceHint(name: string, fallback = false): string {
 
 function buildHeardSoundVoiceHint(name: string): string {
   return `${normalizePetDisplayName(name)}听见了声音`
+}
+
+function getVoiceRecognitionProvider(): VoiceRecognitionProvider {
+  const provider = bootstrapConfig.voiceRecognition && bootstrapConfig.voiceRecognition.provider
+  return provider === 'cloud-asr' ? 'cloud-asr' : 'wechat-si'
 }
 
 Component({
@@ -1618,6 +1636,19 @@ Component({
       this.syncPanelUI()
       this.prepareNextDecoder()
 
+      if (getVoiceRecognitionProvider() === 'wechat-si') {
+        const ready = await this.startWechatSiRecognition()
+        if (!ready) {
+          console.warn('[index] wechat si unavailable, fallback to cloud asr')
+          await this.startCloudAsrRecording()
+        }
+        return
+      }
+
+      await this.startCloudAsrRecording()
+    },
+
+    async startCloudAsrRecording() {
       if (!recorder) {
         this.initRecorder()
       }
@@ -1634,26 +1665,37 @@ Component({
           frameSize: REALTIME_FRAME_SIZE_KB,
         })
 
-        const realtimeReady = await this.prepareRealtimeAsr()
-        asrFallbackToUpload = !realtimeReady
+        const ready = await this.prepareRealtimeAsr()
+        asrFallbackToUpload = !ready
       } catch (error) {
         console.warn('[index] start recorder failed:', error)
-        this.closeRealtimeAsr()
+        this.closeVoiceRecognition()
         this.setVoiceError('需要麦克风权限才能听你说话')
       }
     },
 
     handleListenTouchEnd() {
       this.setData({ orbPressed: false })
+
+      if (wechatSiActive) {
+        recordingStopping = true
+        this.finishVoiceRecognition()
+        return
+      }
+
       if (!recorder || recordingStopping) return
       if (this.data.voiceStatus !== 'recording') {
-        this.closeRealtimeAsr()
+        this.closeVoiceRecognition()
         recorder.stop()
         return
       }
 
       recordingStopping = true
-      this.finishRealtimeAsr()
+      if (getVoiceRecognitionProvider() === 'wechat-si') {
+        this.finishVoiceRecognition()
+      } else {
+        this.finishRealtimeAsr()
+      }
       recorder.stop()
 
       if (stopFallbackTimer) {
@@ -1679,7 +1721,7 @@ Component({
         const text = asrFinalText.trim()
         const realtimeError = asrRealtimeError
 
-        this.closeRealtimeAsr()
+        this.closeVoiceRecognition()
 
         if (duration < MIN_RECORD_MS) {
           this.setVoiceError('再说一遍给我听')
@@ -1716,64 +1758,89 @@ Component({
         return
       }
 
-      if (!wx.cloud) {
-        this.setVoiceError('云开发还没准备好')
-        return
-      }
-
       try {
+        if (getVoiceRecognitionProvider() === 'wechat-si') {
+          const text = asrFinalText.trim()
+          this.closeVoiceRecognition()
+          if (!text) {
+            this.setVoiceError('刚才这句有点轻')
+            return
+          }
+          this.setData({
+            voiceStatus: 'thinking',
+            voiceHint: buildThinkingVoiceHint(this.data.petName),
+            transcribedText: text,
+            petReply: '',
+          })
+          await this.requestPetReply(text)
+          return
+        }
+
         console.info('[index] upload voice file:', {
           duration,
           fileSize: result.fileSize,
           tempFilePath: result.tempFilePath,
         })
-        this.setData({
-          voiceStatus: 'uploading',
-          voiceHint: buildUploadingVoiceHint(this.data.petName),
-          transcribedText: '',
-          petReply: '',
-        })
-
-        const uploadResult = await wx.cloud.uploadFile({
-          cloudPath: `voice-temp/${Date.now()}-${Math.random().toString(36).slice(2)}.${RECORD_FORMAT}`,
-          filePath: result.tempFilePath,
-        })
-
-        this.setData({
-          voiceStatus: 'transcribing',
-          voiceHint: buildTranscribingVoiceHint(this.data.petName),
-        })
-
-        const response = await wx.cloud.callFunction({
-          name: 'voiceTranscribe',
-          data: {
-            fileID: uploadResult.fileID,
-            duration,
-            format: RECORD_FORMAT,
-          },
-        })
-
-        if (!isVoiceTranscribeResult(response.result) || response.result.ok !== true) {
-          const message = isVoiceTranscribeResult(response.result) && response.result.error && response.result.error.message
-
-          this.setVoiceError(message ? voiceErrorMessage(message) : '暂时没听清，再试一次')
-          return
-        }
-
-        const text = response.result.data && response.result.data.text ? response.result.data.text : ''
-
-        this.setData({
-          voiceStatus: text ? 'thinking' : 'success',
-          voiceHint: text ? buildThinkingVoiceHint(this.data.petName) : buildHeardSoundVoiceHint(this.data.petName),
-          transcribedText: text || '刚才这句有点轻',
-        })
-
-        if (text) {
-          await this.requestPetReply(text)
-        }
+        await this.transcribeByCloudUpload(result, duration)
       } catch (error) {
         console.warn('[index] transcribe failed:', error)
         this.setVoiceError(this.formatCloudError(error))
+      }
+    },
+
+    async transcribeByCloudUpload(result: WechatMiniprogram.OnStopCallbackResult, duration: number) {
+      if (!wx.cloud) {
+        this.setVoiceError('云开发还没准备好')
+        return
+      }
+
+      if (!result.tempFilePath) {
+        this.setVoiceError('再说一遍给我听')
+        return
+      }
+
+      this.setData({
+        voiceStatus: 'uploading',
+        voiceHint: buildUploadingVoiceHint(this.data.petName),
+        transcribedText: '',
+        petReply: '',
+      })
+
+      const uploadResult = await wx.cloud.uploadFile({
+        cloudPath: `voice-temp/${Date.now()}-${Math.random().toString(36).slice(2)}.${RECORD_FORMAT}`,
+        filePath: result.tempFilePath,
+      })
+
+      this.setData({
+        voiceStatus: 'transcribing',
+        voiceHint: buildTranscribingVoiceHint(this.data.petName),
+      })
+
+      const response = await wx.cloud.callFunction({
+        name: 'voiceTranscribe',
+        data: {
+          fileID: uploadResult.fileID,
+          duration,
+          format: RECORD_FORMAT,
+        },
+      })
+
+      if (!isVoiceTranscribeResult(response.result) || response.result.ok !== true) {
+        const message = isVoiceTranscribeResult(response.result) && response.result.error && response.result.error.message
+        this.setVoiceError(message ? voiceErrorMessage(message) : '暂时没听清，再试一次')
+        return
+      }
+
+      const text = response.result.data && response.result.data.text ? response.result.data.text : ''
+
+      this.setData({
+        voiceStatus: text ? 'thinking' : 'success',
+        voiceHint: text ? buildThinkingVoiceHint(this.data.petName) : buildHeardSoundVoiceHint(this.data.petName),
+        transcribedText: text || '刚才这句有点轻',
+      })
+
+      if (text) {
+        await this.requestPetReply(text)
       }
     },
 
@@ -1829,8 +1896,140 @@ Component({
       }
     },
 
+    async startWechatSiRecognition(): Promise<boolean> {
+      this.closeVoiceRecognition()
+
+      try {
+        const plugin = typeof requirePlugin === 'function' ? requirePlugin(WECHAT_SI_PLUGIN_NAME) : null
+        const manager = plugin && typeof plugin.getRecordRecognitionManager === 'function'
+          ? plugin.getRecordRecognitionManager()
+          : null
+
+        if (!manager) {
+          console.warn('[index] wechat si plugin unavailable')
+          return false
+        }
+
+        wechatSiManager = manager
+        asrFinalText = ''
+        asrRealtimeError = ''
+        asrSocketReady = false
+        asrSocketOpen = false
+        asrSocketClosedByUser = false
+        asrFallbackToUpload = false
+        wechatSiActive = true
+
+        const onStart = (res: { msg?: string }) => {
+          console.info('[index] wechat si onStart:', res)
+          this.setData({
+            voiceStatus: 'recording',
+            voiceHint: buildListeningVoiceHint(this.data.petName),
+            transcribedText: '',
+            petReply: '',
+          })
+        }
+        const onRecognize = (res: { result?: string }) => {
+          const text = typeof res.result === 'string' ? res.result.trim() : ''
+          if (!text || this.data.voiceStatus !== 'recording') return
+          asrFinalText = text
+          this.setData({
+            transcribedText: text,
+          })
+        }
+        const onStop = async (res: { tempFilePath?: string; duration?: number; fileSize?: number; result?: string }) => {
+          console.info('[index] wechat si onStop:', res)
+          wechatSiActive = false
+          wechatSiManager = null
+          recordingStopping = false
+          const text = typeof res.result === 'string' && res.result.trim() ? res.result.trim() : asrFinalText.trim()
+          asrFinalText = text
+          this.setData({ orbPressed: false })
+
+          if (!text) {
+            this.setVoiceError('刚才这句有点轻')
+            return
+          }
+
+          this.setData({
+            voiceStatus: 'thinking',
+            voiceHint: buildThinkingVoiceHint(this.data.petName),
+            transcribedText: text,
+            petReply: '',
+          })
+          await this.requestPetReply(text)
+        }
+        const onError = (res: { retcode?: number; msg?: string }) => {
+          console.warn('[index] wechat si onError:', res)
+          wechatSiActive = false
+          wechatSiManager = null
+          recordingStopping = false
+          asrRealtimeError = res.msg || '微信同声传译暂时不可用'
+          if (this.data.voiceStatus === 'recording') {
+            this.setVoiceError(voiceErrorMessage(asrRealtimeError))
+          }
+        }
+
+        manager.onStart = onStart
+        manager.onRecognize = onRecognize
+        manager.onStop = onStop
+        manager.onError = onError
+
+        if (typeof manager.start !== 'function') {
+          wechatSiManager = null
+          wechatSiActive = false
+          return false
+        }
+
+        console.info('[index] wechat si start requested')
+        manager.start({
+          duration: MAX_RECORD_MS,
+          lang: 'zh_CN',
+        })
+
+        this.setData({
+          voiceStatus: 'recording',
+          voiceHint: buildListeningVoiceHint(this.data.petName),
+          transcribedText: '',
+          petReply: '',
+        })
+
+        return true
+      } catch (error) {
+        console.warn('[index] prepare wechat si failed:', error)
+        wechatSiManager = null
+        wechatSiActive = false
+        return false
+      }
+    },
+
+    closeVoiceRecognition() {
+      if (wechatSiManager) {
+        try {
+          wechatSiManager.stop()
+        } catch (error) {
+          console.warn('[index] stop wechat si failed:', error)
+        }
+        wechatSiManager = null
+        wechatSiActive = false
+      }
+
+      this.closeRealtimeAsr()
+    },
+
+    finishVoiceRecognition() {
+      if (wechatSiManager) {
+        try {
+          wechatSiManager.stop()
+        } catch (error) {
+          console.warn('[index] finish wechat si failed:', error)
+          wechatSiActive = false
+          recordingStopping = false
+        }
+      }
+    },
+
     handleRecordFrame(result: WechatMiniprogram.OnFrameRecordedCallbackResult) {
-      if (asrFallbackToUpload || !result.frameBuffer) return
+      if (getVoiceRecognitionProvider() !== 'cloud-asr' || asrFallbackToUpload || !result.frameBuffer) return
 
       this.sendRealtimeAsrFrame(result.frameBuffer)
 
@@ -1864,7 +2063,7 @@ Component({
     },
 
     finishRealtimeAsr() {
-      if (!asrSocket || asrFallbackToUpload) return
+      if (getVoiceRecognitionProvider() !== 'cloud-asr' || !asrSocket || asrFallbackToUpload) return
 
       try {
         asrSocket.send({
@@ -1893,6 +2092,7 @@ Component({
     },
 
     handleRealtimeAsrMessage(message: WechatMiniprogram.SocketTaskOnMessageCallbackResult) {
+      if (getVoiceRecognitionProvider() !== 'cloud-asr') return
       if (typeof message.data !== 'string') return
 
       try {

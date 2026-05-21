@@ -1452,6 +1452,9 @@ function normalizeForPersist(config) {
       portraitSourceMemoryLimit: toPositiveInt(config.aiMemory && config.aiMemory.portraitSourceMemoryLimit, fallbackAiMemory.portraitSourceMemoryLimit),
       portraitMaxLength: toPositiveInt(config.aiMemory && config.aiMemory.portraitMaxLength, fallbackAiMemory.portraitMaxLength),
     },
+    voiceRecognition: {
+      provider: config.voiceRecognition && config.voiceRecognition.provider === 'cloud-asr' ? 'cloud-asr' : 'wechat-si',
+    },
   }
 }
 
@@ -1471,6 +1474,10 @@ function validateConfig(config, options = {}) {
     if (!Number.isInteger(value) || value <= 0) {
       issues.push({ field: `aiMemory.${field}`, message: `AI 记忆参数 ${field} 必须是大于 0 的整数` })
     }
+  }
+
+  if (config.voiceRecognition && !['wechat-si', 'cloud-asr'].includes(config.voiceRecognition.provider)) {
+    issues.push({ field: 'voiceRecognition.provider', message: '语音识别方案必须是微信同声传译或现有云端方案' })
   }
 
   if (strict && !enabledPets.length) {

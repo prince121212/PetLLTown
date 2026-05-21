@@ -2,6 +2,12 @@
   "pages": [
     "pages/index/index"
   ],
+  "plugins": {
+    "WechatSI": {
+      "version": "0.0.7",
+      "provider": "wx069ba97219f66d99"
+    }
+  },
   "window": {
     "navigationStyle": "custom",
     "navigationBarTextStyle": "white",

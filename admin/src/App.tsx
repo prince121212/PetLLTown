@@ -1019,6 +1019,23 @@ function HomeView({
           setDraft({ ...draft, aiMemory: { ...draft.aiMemory, portraitMaxLength: value } })
         }
       />
+      <SelectField
+        label="语音识别方案"
+        value={draft.voiceRecognition.provider}
+        options={[
+          { value: 'wechat-si', label: '微信同声传译（默认）' },
+          { value: 'cloud-asr', label: '现有云端方案' },
+        ]}
+        onChange={(value) =>
+          setDraft({
+            ...draft,
+            voiceRecognition: {
+              ...draft.voiceRecognition,
+              provider: value === 'cloud-asr' ? 'cloud-asr' : 'wechat-si',
+            },
+          })
+        }
+      />
       <TextField
         label="会员卡标题"
         value={draft.settings.miniAd.title}

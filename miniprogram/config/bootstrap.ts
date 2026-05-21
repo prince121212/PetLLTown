@@ -41,6 +41,10 @@ export interface AiMemoryConfig {
   portraitMaxLength: number
 }
 
+export interface VoiceRecognitionConfig {
+  provider: 'wechat-si' | 'cloud-asr'
+}
+
 export interface MiniAdConfig {
   enabled: boolean
   title: string
@@ -63,6 +67,7 @@ export interface BootstrapConfig {
   homeHint: string
   homeMedia: HomeMediaConfig
   aiMemory: AiMemoryConfig
+  voiceRecognition: VoiceRecognitionConfig
   settings: {
     items: SettingItem[]
     miniAd: MiniAdConfig
@@ -95,6 +100,9 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
     portraitTriggerCount: 3,
     portraitSourceMemoryLimit: 15,
     portraitMaxLength: 200,
+  },
+  voiceRecognition: {
+    provider: 'wechat-si',
   },
   settings: {
     items: [
@@ -286,6 +294,14 @@ function mergeAiMemory(value: unknown): AiMemoryConfig {
   }
 }
 
+function mergeVoiceRecognition(value: unknown): VoiceRecognitionConfig {
+  if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.voiceRecognition
+
+  return {
+    provider: value.provider === 'cloud-asr' ? 'cloud-asr' : 'wechat-si',
+  }
+}
+
 export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
   if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG
 
@@ -306,6 +322,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     homeHint: typeof value.homeHint === 'string' ? value.homeHint : FALLBACK_BOOTSTRAP_CONFIG.homeHint,
     homeMedia: mergeHomeMedia(value.homeMedia),
     aiMemory: mergeAiMemory(value.aiMemory),
+    voiceRecognition: mergeVoiceRecognition(value.voiceRecognition),
     settings: {
       items: items.length ? items : FALLBACK_BOOTSTRAP_CONFIG.settings.items,
       miniAd: mergeMiniAd(settings.miniAd),

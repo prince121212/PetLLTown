@@ -35,6 +35,10 @@ function mergeBootstrapConfig(base, override) {
       ...base.aiMemory,
       ...(override.aiMemory || {}),
     },
+    voiceRecognition: {
+      ...base.voiceRecognition,
+      ...(override.voiceRecognition || {}),
+    },
     settings: {
       ...base.settings,
       ...settings,

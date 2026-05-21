@@ -17,6 +17,9 @@
     "portraitSourceMemoryLimit": 15,
     "portraitMaxLength": 200
   },
+  "voiceRecognition": {
+    "provider": "wechat-si"
+  },
   "assets": {
     "cloudEnvId": "cloud1-d0gz0y40r67b3198e",
     "storageBucket": "636c-cloud1-d0gz0y40r67b3198e-1396635429",
@@ -159,7 +162,7 @@
   "featureFlags": {
     "cloudBootstrap": true,
     "petPicker": true,
-    "voiceInput": false,
+    "voiceInput": true,
     "aiResponse": false,
     "payments": false
   }
