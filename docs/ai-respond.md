@@ -44,6 +44,13 @@ https://docs.cloudbase.net/api-reference/server/node-sdk/ai
 
 记忆写入是独立于回复生成的第二步：云函数会先生成宠物回复，再单独调用一次 AI 进行记忆抽取。这样像“我最喜欢打篮球”这类稳定偏好更容易被保存到 `user_memories`，而普通闲聊通常不会进入记忆。
 
+AI 记忆策略由后台启动配置 `aiMemory` 控制：
+
+- `shortTermMemoryMaxCount`：短期记忆最多保留多少条。
+- `portraitTriggerCount`：累计多少条新记忆后触发用户画像更新。
+- `portraitSourceMemoryLimit`：生成画像时读取多少条近期记忆。
+- `portraitMaxLength`：画像文本最大字数。
+
 ## 部署
 
 确保集合存在：
@@ -71,7 +78,13 @@ npm run check:cloudbase
   "ok": true,
   "ready": true,
   "provider": "hunyuan-v3",
-  "model": "hy3-preview"
+  "model": "hy3-preview",
+  "aiMemory": {
+    "shortTermMemoryMaxCount": 8,
+    "portraitTriggerCount": 3,
+    "portraitSourceMemoryLimit": 15,
+    "portraitMaxLength": 200
+  }
 }
 ```
 

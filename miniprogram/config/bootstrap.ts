@@ -34,6 +34,13 @@ export interface RoomOption {
   enabled?: boolean
 }
 
+export interface AiMemoryConfig {
+  shortTermMemoryMaxCount: number
+  portraitTriggerCount: number
+  portraitSourceMemoryLimit: number
+  portraitMaxLength: number
+}
+
 export interface MiniAdConfig {
   enabled: boolean
   title: string
@@ -55,6 +62,7 @@ export interface BootstrapConfig {
   defaultPetName: string
   homeHint: string
   homeMedia: HomeMediaConfig
+  aiMemory: AiMemoryConfig
   settings: {
     items: SettingItem[]
     miniAd: MiniAdConfig
@@ -81,6 +89,12 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
     backgroundVideoUrl: '',
     petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
     listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
+  },
+  aiMemory: {
+    shortTermMemoryMaxCount: 8,
+    portraitTriggerCount: 3,
+    portraitSourceMemoryLimit: 15,
+    portraitMaxLength: 200,
   },
   settings: {
     items: [
@@ -197,6 +211,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object'
 }
 
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  return normalized > 0 ? normalized : fallback
+}
+
 function isPetOption(value: unknown): value is PetOption {
   if (!isRecord(value)) return false
 
@@ -254,6 +275,17 @@ function mergeMiniAd(value: unknown): MiniAdConfig {
   }
 }
 
+function mergeAiMemory(value: unknown): AiMemoryConfig {
+  if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.aiMemory
+
+  return {
+    shortTermMemoryMaxCount: toPositiveInt(value.shortTermMemoryMaxCount, FALLBACK_BOOTSTRAP_CONFIG.aiMemory.shortTermMemoryMaxCount),
+    portraitTriggerCount: toPositiveInt(value.portraitTriggerCount, FALLBACK_BOOTSTRAP_CONFIG.aiMemory.portraitTriggerCount),
+    portraitSourceMemoryLimit: toPositiveInt(value.portraitSourceMemoryLimit, FALLBACK_BOOTSTRAP_CONFIG.aiMemory.portraitSourceMemoryLimit),
+    portraitMaxLength: toPositiveInt(value.portraitMaxLength, FALLBACK_BOOTSTRAP_CONFIG.aiMemory.portraitMaxLength),
+  }
+}
+
 export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
   if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG
 
@@ -273,6 +305,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     defaultPetName: typeof value.defaultPetName === 'string' ? value.defaultPetName : FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
     homeHint: typeof value.homeHint === 'string' ? value.homeHint : FALLBACK_BOOTSTRAP_CONFIG.homeHint,
     homeMedia: mergeHomeMedia(value.homeMedia),
+    aiMemory: mergeAiMemory(value.aiMemory),
     settings: {
       items: items.length ? items : FALLBACK_BOOTSTRAP_CONFIG.settings.items,
       miniAd: mergeMiniAd(settings.miniAd),

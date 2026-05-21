@@ -1420,10 +1420,23 @@ function normalizeConfig(value) {
   return value
 }
 
+function toPositiveInt(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  return normalized > 0 ? normalized : fallback
+}
+
 function normalizeForPersist(config) {
   const homeHint = config.homeHint || (config.home && config.home.hint) || ''
   const pets = Array.isArray(config.pets) ? config.pets : []
   const defaultPet = pets.find((pet) => pet.id === config.defaultPetId)
+  const fallbackAiMemory = {
+    shortTermMemoryMaxCount: 8,
+    portraitTriggerCount: 3,
+    portraitSourceMemoryLimit: 15,
+    portraitMaxLength: 200,
+  }
 
   return {
     ...config,
@@ -1432,6 +1445,12 @@ function normalizeForPersist(config) {
     home: {
       ...(config.home || {}),
       hint: homeHint,
+    },
+    aiMemory: {
+      shortTermMemoryMaxCount: toPositiveInt(config.aiMemory && config.aiMemory.shortTermMemoryMaxCount, fallbackAiMemory.shortTermMemoryMaxCount),
+      portraitTriggerCount: toPositiveInt(config.aiMemory && config.aiMemory.portraitTriggerCount, fallbackAiMemory.portraitTriggerCount),
+      portraitSourceMemoryLimit: toPositiveInt(config.aiMemory && config.aiMemory.portraitSourceMemoryLimit, fallbackAiMemory.portraitSourceMemoryLimit),
+      portraitMaxLength: toPositiveInt(config.aiMemory && config.aiMemory.portraitMaxLength, fallbackAiMemory.portraitMaxLength),
     },
   }
 }
@@ -1445,6 +1464,14 @@ function validateConfig(config, options = {}) {
   const enabledRooms = rooms.filter((room) => room.enabled !== false)
   const petIds = new Set()
   const roomIds = new Set()
+  const aiMemory = config.aiMemory || {}
+
+  for (const field of ['shortTermMemoryMaxCount', 'portraitTriggerCount', 'portraitSourceMemoryLimit', 'portraitMaxLength']) {
+    const value = aiMemory[field]
+    if (!Number.isInteger(value) || value <= 0) {
+      issues.push({ field: `aiMemory.${field}`, message: `AI 记忆参数 ${field} 必须是大于 0 的整数` })
+    }
+  }
 
   if (strict && !enabledPets.length) {
     issues.push({ field: 'pets', message: '至少需要一个启用宠物' })

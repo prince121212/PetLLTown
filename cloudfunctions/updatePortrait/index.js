@@ -8,6 +8,48 @@ const PROVIDER = process.env.AI_PROVIDER || 'hunyuan-v3'
 const MODEL = process.env.AI_MODEL || 'hy3-preview'
 const MEMORIES_COLLECTION = 'user_memories'
 const PROFILES_COLLECTION = 'user_profiles'
+const CONFIG_COLLECTION = 'app_configs'
+const CONFIG_DOC_ID = 'bootstrap'
+const DEFAULT_AI_MEMORY_CONFIG = {
+  shortTermMemoryMaxCount: 8,
+  portraitTriggerCount: 3,
+  portraitSourceMemoryLimit: 15,
+  portraitMaxLength: 200,
+}
+
+function toPositiveInt(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  return normalized > 0 ? normalized : fallback
+}
+
+function normalizeAiMemoryConfig(value) {
+  const source = value && typeof value === 'object' ? value : {}
+
+  return {
+    shortTermMemoryMaxCount: toPositiveInt(source.shortTermMemoryMaxCount, DEFAULT_AI_MEMORY_CONFIG.shortTermMemoryMaxCount),
+    portraitTriggerCount: toPositiveInt(source.portraitTriggerCount, DEFAULT_AI_MEMORY_CONFIG.portraitTriggerCount),
+    portraitSourceMemoryLimit: toPositiveInt(source.portraitSourceMemoryLimit, DEFAULT_AI_MEMORY_CONFIG.portraitSourceMemoryLimit),
+    portraitMaxLength: toPositiveInt(source.portraitMaxLength, DEFAULT_AI_MEMORY_CONFIG.portraitMaxLength),
+  }
+}
+
+async function loadAiMemoryConfig(eventConfig) {
+  if (eventConfig && typeof eventConfig === 'object') {
+    return normalizeAiMemoryConfig(eventConfig)
+  }
+
+  try {
+    const result = await db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC_ID).get()
+    const record = result && result.data
+    const config = record && record.config ? record.config : record
+    return normalizeAiMemoryConfig(config && config.aiMemory)
+  } catch (error) {
+    console.warn('[updatePortrait] load ai memory config fallback:', error && error.message ? error.message : error)
+    return normalizeAiMemoryConfig(null)
+  }
+}
 
 async function ensureCollection(name) {
   try {
@@ -33,6 +75,7 @@ exports.main = async (event = {}) => {
   const env = wxContext.ENV || process.env.TCB_ENV || ''
 
   try {
+    const aiMemoryConfig = await loadAiMemoryConfig(event.aiMemory)
     await ensureCollection(PROFILES_COLLECTION)
     const profile = await db.collection(PROFILES_COLLECTION).doc(openId).get().then((r) => r.data).catch(() => null)
     if (!profile || !profile._needsPortraitUpdate) {
@@ -43,7 +86,7 @@ exports.main = async (event = {}) => {
     const memoriesResult = await db.collection(MEMORIES_COLLECTION)
       .where({ _openId: openId })
       .orderBy('importance', 'desc')
-      .limit(15)
+      .limit(aiMemoryConfig.portraitSourceMemoryLimit)
       .get()
     const memories = memoriesResult.data || []
 
@@ -62,7 +105,7 @@ exports.main = async (event = {}) => {
         messages: [
           {
             role: 'system',
-            content: '你是一个用户画像生成器。根据用户的记忆列表，生成一段简洁的用户画像（100-150字）。要求：合并同一实体的信息，去除过时信息，保留最新状态，语言简洁像人物档案。只输出画像文本，不要解释。',
+            content: `你是一个用户画像生成器。根据用户的记忆列表，生成一段简洁的用户画像，不超过 ${aiMemoryConfig.portraitMaxLength} 字。要求：合并同一实体的信息，去除过时信息，保留最新状态，语言简洁像人物档案。只输出画像文本，不要解释。`,
           },
           {
             role: 'user',
@@ -75,7 +118,7 @@ exports.main = async (event = {}) => {
       { timeout: 15000 },
     )
 
-    const newPortrait = (result.text || '').trim().slice(0, 200)
+    const newPortrait = (result.text || '').trim().slice(0, aiMemoryConfig.portraitMaxLength)
 
     await db.collection(PROFILES_COLLECTION).doc(openId).update({
       data: {
@@ -86,7 +129,7 @@ exports.main = async (event = {}) => {
       },
     })
 
-    return { ok: true, data: { portrait: newPortrait } }
+    return { ok: true, data: { portrait: newPortrait, aiMemoryConfig } }
   } catch (error) {
     console.warn('[updatePortrait] failed:', error && error.message ? error.message : error)
     return { ok: false, error: { message: error.message || '画像更新失败' } }

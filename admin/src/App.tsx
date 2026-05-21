@@ -39,7 +39,6 @@ import {
   cloneConfig,
   diffConfigs,
   generateDiffSummary,
-  nextSortOrder,
   normalizeBootstrapConfig,
   removePet,
   removeRoom,
@@ -75,20 +74,6 @@ const navItems: Array<{ key: RouteKey; path: string; label: string; icon: typeof
   { key: 'media', path: '/media', label: '素材自动化', icon: CloudUpload },
   { key: 'publish', path: '/publish', label: '发布中心', icon: GitBranch },
 ]
-
-function emptyPet(sortOrder: number): PetOption {
-  return {
-    id: '',
-    name: '',
-    subtitle: '',
-    frameOffset: sortOrder,
-    manifestKey: '',
-    videoUrl: '',
-    thumbUrl: '',
-    listenFrameUrl: '',
-    enabled: true,
-  }
-}
 
 function emptyRoom(): RoomOption {
   return {
@@ -361,6 +346,10 @@ function Dashboard({
           <span>默认宠物：{config.pets.find((pet) => pet.id === config.defaultPetId)?.name || config.defaultPetId || '-'}</span>
           <span>默认背景：{config.rooms.find((room) => room.id === config.defaultRoomId)?.name || config.defaultRoomId || '-'}</span>
           <span>首页提示：{config.homeHint}</span>
+          <span>短期记忆上限：{config.aiMemory.shortTermMemoryMaxCount} 条</span>
+          <span>画像触发阈值：{config.aiMemory.portraitTriggerCount} 条</span>
+          <span>画像聚合条数：{config.aiMemory.portraitSourceMemoryLimit} 条</span>
+          <span>画像最大字数：{config.aiMemory.portraitMaxLength} 字</span>
           <span>配置版本：{config.configVersion}</span>
         </div>
       </div>
@@ -440,8 +429,8 @@ function PetsView({
     <section className="panel">
       <div className="panel-head">
         <h2>宠物列表</h2>
-        <button className="primary-button" onClick={() => setEditing(emptyPet(nextSortOrder(config)))} type="button">
-          新增宠物
+        <button className="primary-button" onClick={() => navigate('/media')} type="button">
+          去素材自动化新增
         </button>
       </div>
       <DataTable
@@ -1000,6 +989,34 @@ function HomeView({
         value={draft.homeMedia.listenOrbVideoUrl}
         onChange={(value) =>
           setDraft({ ...draft, homeMedia: { ...draft.homeMedia, listenOrbVideoUrl: value } })
+        }
+      />
+      <NumberField
+        label="短期记忆上限"
+        value={draft.aiMemory.shortTermMemoryMaxCount}
+        onChange={(value) =>
+          setDraft({ ...draft, aiMemory: { ...draft.aiMemory, shortTermMemoryMaxCount: value } })
+        }
+      />
+      <NumberField
+        label="画像触发阈值"
+        value={draft.aiMemory.portraitTriggerCount}
+        onChange={(value) =>
+          setDraft({ ...draft, aiMemory: { ...draft.aiMemory, portraitTriggerCount: value } })
+        }
+      />
+      <NumberField
+        label="画像聚合记忆条数"
+        value={draft.aiMemory.portraitSourceMemoryLimit}
+        onChange={(value) =>
+          setDraft({ ...draft, aiMemory: { ...draft.aiMemory, portraitSourceMemoryLimit: value } })
+        }
+      />
+      <NumberField
+        label="画像最大字数"
+        value={draft.aiMemory.portraitMaxLength}
+        onChange={(value) =>
+          setDraft({ ...draft, aiMemory: { ...draft.aiMemory, portraitMaxLength: value } })
         }
       />
       <TextField

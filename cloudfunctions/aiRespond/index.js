@@ -10,9 +10,47 @@ const PROVIDER = process.env.AI_PROVIDER || 'hunyuan-v3'
 const MODEL = process.env.AI_MODEL || 'hy3-preview'
 const MAX_TEXT_LENGTH = 160
 const DEFAULT_PET_ID = 'xiaotuanzi'
+const CONFIG_COLLECTION = 'app_configs'
+const CONFIG_DOC_ID = 'bootstrap'
+const DEFAULT_AI_MEMORY_CONFIG = {
+  shortTermMemoryMaxCount: 8,
+  portraitTriggerCount: 3,
+  portraitSourceMemoryLimit: 15,
+  portraitMaxLength: 200,
+}
 
 function now() {
   return new Date().toISOString()
+}
+
+function toPositiveInt(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  return normalized > 0 ? normalized : fallback
+}
+
+function normalizeAiMemoryConfig(value) {
+  const source = value && typeof value === 'object' ? value : {}
+
+  return {
+    shortTermMemoryMaxCount: toPositiveInt(source.shortTermMemoryMaxCount, DEFAULT_AI_MEMORY_CONFIG.shortTermMemoryMaxCount),
+    portraitTriggerCount: toPositiveInt(source.portraitTriggerCount, DEFAULT_AI_MEMORY_CONFIG.portraitTriggerCount),
+    portraitSourceMemoryLimit: toPositiveInt(source.portraitSourceMemoryLimit, DEFAULT_AI_MEMORY_CONFIG.portraitSourceMemoryLimit),
+    portraitMaxLength: toPositiveInt(source.portraitMaxLength, DEFAULT_AI_MEMORY_CONFIG.portraitMaxLength),
+  }
+}
+
+async function loadAiMemoryConfig() {
+  try {
+    const result = await db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC_ID).get()
+    const record = result && result.data
+    const config = record && record.config ? record.config : record
+    return normalizeAiMemoryConfig(config && config.aiMemory)
+  } catch (error) {
+    console.warn('[aiRespond] load ai memory config fallback:', error && error.message ? error.message : error)
+    return normalizeAiMemoryConfig(null)
+  }
 }
 
 function clampText(value, maxLength) {
@@ -280,8 +318,6 @@ async function writeAiLog(log) {
 
 const MEMORIES_COLLECTION = 'user_memories'
 const PROFILES_COLLECTION = 'user_profiles'
-const MAX_MEMORIES = 8
-const PORTRAIT_TRIGGER_COUNT = 3
 
 async function ensureCollection(name) {
   try {
@@ -294,12 +330,12 @@ async function ensureCollection(name) {
   }
 }
 
-async function loadMemories(openId) {
+async function loadMemories(openId, limit = DEFAULT_AI_MEMORY_CONFIG.shortTermMemoryMaxCount) {
   try {
     const result = await db.collection(MEMORIES_COLLECTION)
       .where({ _openId: openId })
       .orderBy('importance', 'desc')
-      .limit(MAX_MEMORIES)
+      .limit(limit)
       .get()
     return result.data || []
   } catch {
@@ -316,13 +352,14 @@ async function loadPortrait(openId) {
   }
 }
 
-async function writeMemory(openId, memory) {
+async function writeMemory(openId, memory, aiMemoryConfig) {
   if (!memory || !memory.content) return
 
   try {
-    const existing = await loadMemories(openId)
+    const maxMemories = aiMemoryConfig.shortTermMemoryMaxCount
+    const existing = await loadMemories(openId, maxMemories)
 
-    if (existing.length >= MAX_MEMORIES) {
+    if (existing.length >= maxMemories) {
       const scored = existing.map((m) => ({
         ...m,
         score: (m.importance || 0.4) + Math.max(0, 1 - (Date.now() - new Date(m.createdAt).getTime()) / (72 * 3600 * 1000)),
@@ -344,7 +381,7 @@ async function writeMemory(openId, memory) {
       },
     })
 
-    return await checkPortraitUpdate(openId)
+    return await checkPortraitUpdate(openId, aiMemoryConfig)
   } catch (error) {
     if (error && error.message && error.message.includes('DATABASE_COLLECTION_NOT_EXIST')) {
       try {
@@ -358,7 +395,7 @@ async function writeMemory(openId, memory) {
             createdAt: now(),
           },
         })
-        return await checkPortraitUpdate(openId)
+        return await checkPortraitUpdate(openId, aiMemoryConfig)
       } catch {}
     }
     console.warn('[aiRespond] writeMemory failed:', error && error.message ? error.message : error)
@@ -366,7 +403,7 @@ async function writeMemory(openId, memory) {
   }
 }
 
-async function checkPortraitUpdate(openId) {
+async function checkPortraitUpdate(openId, aiMemoryConfig) {
   try {
     await ensureCollection(PROFILES_COLLECTION)
     let profile = await loadPortrait(openId)
@@ -394,13 +431,13 @@ async function checkPortraitUpdate(openId) {
     }
 
     const count = (profile.memoryCountSinceUpdate || 0) + 1
-    if (count >= PORTRAIT_TRIGGER_COUNT) {
+    if (count >= aiMemoryConfig.portraitTriggerCount) {
       await db.collection(PROFILES_COLLECTION).doc(openId).update({
         data: { memoryCountSinceUpdate: 0, _needsPortraitUpdate: true },
       })
       let updateResult = null
       try {
-        updateResult = await cloud.callFunction({ name: 'updatePortrait', data: { openId } })
+        updateResult = await cloud.callFunction({ name: 'updatePortrait', data: { openId, aiMemory: aiMemoryConfig } })
       } catch (error) {
         console.warn('[aiRespond] updatePortrait call failed:', error && error.message ? error.message : error)
       }
@@ -583,6 +620,7 @@ exports.main = async (event = {}, context = {}) => {
   }
 
   if (event.__checkOnly === true) {
+    const aiMemoryConfig = await loadAiMemoryConfig()
     return {
       ok: true,
       data: {
@@ -590,6 +628,7 @@ exports.main = async (event = {}, context = {}) => {
         provider: PROVIDER,
         model: MODEL,
         maxTextLength: MAX_TEXT_LENGTH,
+        aiMemory: aiMemoryConfig,
       },
       meta: {
         env,
@@ -618,7 +657,8 @@ exports.main = async (event = {}, context = {}) => {
 
   try {
     const openId = wxContext.OPENID || ''
-    const memories = openId ? await loadMemories(openId) : []
+    const aiMemoryConfig = await loadAiMemoryConfig()
+    const memories = openId ? await loadMemories(openId, aiMemoryConfig.shortTermMemoryMaxCount) : []
     const profile = openId ? await loadPortrait(openId) : null
     let portraitText = profile && profile.portrait ? profile.portrait : ''
 
@@ -656,13 +696,13 @@ exports.main = async (event = {}, context = {}) => {
 
     let portraitUpdateInfo = null
     if (memory && openId) {
-      portraitUpdateInfo = await writeMemory(openId, memory)
+      portraitUpdateInfo = await writeMemory(openId, memory, aiMemoryConfig)
       if (portraitUpdateInfo && typeof portraitUpdateInfo.portrait === 'string' && portraitUpdateInfo.portrait.trim()) {
         portraitText = portraitUpdateInfo.portrait.trim()
       }
     }
 
-    const updatedMemories = openId ? await loadMemories(openId) : []
+    const updatedMemories = openId ? await loadMemories(openId, aiMemoryConfig.shortTermMemoryMaxCount) : []
 
     await writeAiLog({
       ...baseLog,
@@ -676,6 +716,7 @@ exports.main = async (event = {}, context = {}) => {
       memoryImportance: memory ? memory.importance : undefined,
       portraitUpdated: portraitUpdateInfo ? portraitUpdateInfo.updated : false,
       portraitMemoryCount: portraitUpdateInfo ? portraitUpdateInfo.memoryCountSinceUpdate : undefined,
+      aiMemoryConfig,
       usage: aiResult.usage,
       elapsedMs: Date.now() - startedAt,
     })
@@ -695,6 +736,7 @@ exports.main = async (event = {}, context = {}) => {
         portraitUpdated: portraitUpdateInfo ? portraitUpdateInfo.updated : false,
         portraitTriggered: portraitUpdateInfo ? portraitUpdateInfo.triggered : false,
         portraitMemoryCount: portraitUpdateInfo ? portraitUpdateInfo.memoryCountSinceUpdate : undefined,
+        aiMemoryConfig,
       },
     }
   } catch (error) {

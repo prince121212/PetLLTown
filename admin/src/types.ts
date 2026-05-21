@@ -23,6 +23,13 @@ export interface RoomOption {
   enabled?: boolean
 }
 
+export interface AiMemoryConfig {
+  shortTermMemoryMaxCount: number
+  portraitTriggerCount: number
+  portraitSourceMemoryLimit: number
+  portraitMaxLength: number
+}
+
 export interface SettingItem {
   id: string
   icon: string
@@ -47,6 +54,7 @@ export interface BootstrapConfig {
     petVideoUrl: string
     listenOrbVideoUrl: string
   }
+  aiMemory: AiMemoryConfig
   settings: {
     items: SettingItem[]
     miniAd: {

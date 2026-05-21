@@ -1,7 +1,14 @@
-import { BootstrapConfig, PetOption, RoomOption, ValidationIssue } from './types'
+import { AiMemoryConfig, BootstrapConfig, PetOption, RoomOption, ValidationIssue } from './types'
 
 export function cloneConfig(config: BootstrapConfig): BootstrapConfig {
   return JSON.parse(JSON.stringify(config)) as BootstrapConfig
+}
+
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  return normalized > 0 ? normalized : fallback
 }
 
 export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfig {
@@ -18,12 +25,24 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
       copy: '',
     },
   }
+  const fallbackAiMemory: AiMemoryConfig = {
+    shortTermMemoryMaxCount: 8,
+    portraitTriggerCount: 3,
+    portraitSourceMemoryLimit: 15,
+    portraitMaxLength: 200,
+  }
 
   return {
     ...value,
     homeMedia: {
       ...fallbackHomeMedia,
       ...(value.homeMedia || {}),
+    },
+    aiMemory: {
+      shortTermMemoryMaxCount: toPositiveInt(value.aiMemory?.shortTermMemoryMaxCount, fallbackAiMemory.shortTermMemoryMaxCount),
+      portraitTriggerCount: toPositiveInt(value.aiMemory?.portraitTriggerCount, fallbackAiMemory.portraitTriggerCount),
+      portraitSourceMemoryLimit: toPositiveInt(value.aiMemory?.portraitSourceMemoryLimit, fallbackAiMemory.portraitSourceMemoryLimit),
+      portraitMaxLength: toPositiveInt(value.aiMemory?.portraitMaxLength, fallbackAiMemory.portraitMaxLength),
     },
     settings: {
       ...fallbackSettings,
@@ -53,6 +72,25 @@ export function validateConfig(config: BootstrapConfig, options: ValidateOptions
 
   if (!config.appName.trim()) {
     issues.push({ field: 'appName', message: '应用名称不能为空' })
+  }
+
+  const aiMemory =
+    config.aiMemory ||
+    ({
+      shortTermMemoryMaxCount: 8,
+      portraitTriggerCount: 3,
+      portraitSourceMemoryLimit: 15,
+      portraitMaxLength: 200,
+    } as AiMemoryConfig)
+  for (const [field, value] of [
+    ['shortTermMemoryMaxCount', aiMemory.shortTermMemoryMaxCount],
+    ['portraitTriggerCount', aiMemory.portraitTriggerCount],
+    ['portraitSourceMemoryLimit', aiMemory.portraitSourceMemoryLimit],
+    ['portraitMaxLength', aiMemory.portraitMaxLength],
+  ] as const) {
+    if (!Number.isInteger(value) || value <= 0) {
+      issues.push({ field: `aiMemory.${field}`, message: `AI 记忆参数「${field}」必须是大于 0 的整数` })
+    }
   }
 
   for (const pet of config.pets) {
@@ -418,6 +456,21 @@ export function generateDiffSummary(
 
   if (before.appName !== after.appName) {
     lines.push(`应用名称改为「${after.appName}」`)
+  }
+
+  const beforeAiMemory = before.aiMemory || {}
+  const afterAiMemory = after.aiMemory || {}
+  if (beforeAiMemory.shortTermMemoryMaxCount !== afterAiMemory.shortTermMemoryMaxCount) {
+    lines.push(`短期记忆上限改为 ${afterAiMemory.shortTermMemoryMaxCount} 条`)
+  }
+  if (beforeAiMemory.portraitTriggerCount !== afterAiMemory.portraitTriggerCount) {
+    lines.push(`画像更新阈值改为 ${afterAiMemory.portraitTriggerCount} 条`)
+  }
+  if (beforeAiMemory.portraitSourceMemoryLimit !== afterAiMemory.portraitSourceMemoryLimit) {
+    lines.push(`画像聚合记忆条数改为 ${afterAiMemory.portraitSourceMemoryLimit} 条`)
+  }
+  if (beforeAiMemory.portraitMaxLength !== afterAiMemory.portraitMaxLength) {
+    lines.push(`画像最大字数改为 ${afterAiMemory.portraitMaxLength} 字`)
   }
 
   if (!lines.length) {

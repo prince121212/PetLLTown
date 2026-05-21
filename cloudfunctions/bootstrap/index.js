@@ -31,6 +31,10 @@ function mergeBootstrapConfig(base, override) {
       ...base.homeMedia,
       ...(override.homeMedia || {}),
     },
+    aiMemory: {
+      ...base.aiMemory,
+      ...(override.aiMemory || {}),
+    },
     settings: {
       ...base.settings,
       ...settings,

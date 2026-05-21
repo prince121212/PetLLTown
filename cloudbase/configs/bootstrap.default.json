@@ -11,6 +11,12 @@
     "petVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4",
     "listenOrbVideoUrl": "cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4"
   },
+  "aiMemory": {
+    "shortTermMemoryMaxCount": 8,
+    "portraitTriggerCount": 3,
+    "portraitSourceMemoryLimit": 15,
+    "portraitMaxLength": 200
+  },
   "assets": {
     "cloudEnvId": "cloud1-d0gz0y40r67b3198e",
     "storageBucket": "636c-cloud1-d0gz0y40r67b3198e-1396635429",
