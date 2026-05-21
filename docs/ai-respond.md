@@ -42,6 +42,8 @@ https://docs.cloudbase.net/api-reference/server/node-sdk/ai
 
 如果 CloudBase AI 暂时不可用，云函数会返回 `source: "fallback"` 的规则兜底回复，并在 `meta.error` 和 `ai_logs` 中记录错误，不影响前端交互。
 
+记忆写入是独立于回复生成的第二步：云函数会先生成宠物回复，再单独调用一次 AI 进行记忆抽取。这样像“我最喜欢打篮球”这类稳定偏好更容易被保存到 `user_memories`，而普通闲聊通常不会进入记忆。
+
 ## 部署
 
 确保集合存在：
@@ -75,4 +77,4 @@ npm run check:cloudbase
 
 ## 数据
 
-`ai_logs` 记录 `_openid`、`petId`、`provider`、`model`、状态、回复长度、动作建议、token usage、错误码和耗时。
+`ai_logs` 记录 `_openid`、`petId`、`provider`、`model`、状态、回复长度、动作建议、token usage、记忆来源、错误码和耗时。

@@ -55,19 +55,19 @@ export function tick(state: PetState, elapsedSeconds: number): PetState {
   const s = { ...state }
 
   const timeOfDay = getTimeOfDay()
-  let energyDecay = 0.08
-  if (timeOfDay === '晚上') energyDecay = 0.12
-  if (timeOfDay === '深夜') energyDecay = 0.15
+  let energyDecay = 0.012
+  if (timeOfDay === '晚上') energyDecay = 0.018
+  if (timeOfDay === '深夜') energyDecay = 0.025
 
   s.energy = clamp(s.energy - energyDecay * elapsedSeconds, 0, 100)
 
   const timeSinceInteraction = (Date.now() - s.lastInteractionAt) / 1000
   if (timeSinceInteraction > 300) {
-    s.affection = clamp(s.affection - 0.03 * elapsedSeconds, 0, 100)
+    s.affection = clamp(s.affection - 0.005 * elapsedSeconds, 0, 100)
   }
 
   if (s.currentScene === 'sleep-loop') {
-    s.energy = clamp(s.energy + 0.5 * elapsedSeconds, 0, 100)
+    s.energy = clamp(s.energy + 0.08 * elapsedSeconds, 0, 100)
   }
 
   s.updatedAt = Date.now()

@@ -1460,6 +1460,23 @@ Component({
 
     toggleDebug() {
       this.setData({ debugOpen: !this.data.debugOpen })
+      console.info('[debug-dump]', JSON.stringify({
+        petState: {
+          energy: Math.round(petState.energy),
+          affection: Math.round(petState.affection),
+          mood: petState.mood,
+          currentScene: petState.currentScene,
+          consecutiveDays: petState.consecutiveDays,
+        },
+        activePetId,
+        queue: petSceneQueue.slice(0, 5),
+        voiceStatus: this.data.voiceStatus,
+        chatHistoryLength: chatHistory.length,
+        chatHistory: chatHistory.slice(-3),
+        manifestActions: petManifestActions.map((a) => `${a.id}(${a.videoUrls ? a.videoUrls.length : 0})`),
+        debugMemories: this.data.debugMemories,
+        debugPortrait: this.data.debugPortrait,
+      }, null, 2))
     },
 
     backHome() {
@@ -1565,6 +1582,7 @@ Component({
       this.setData({ orbPressed: false })
       if (!recorder || recordingStopping) return
       if (this.data.voiceStatus !== 'recording') {
+        this.closeRealtimeAsr()
         recorder.stop()
         return
       }
@@ -1891,6 +1909,9 @@ Component({
         if (meta) {
           if (Array.isArray(meta.memories)) this.setData({ debugMemories: meta.memories as string[] })
           if (typeof meta.portrait === 'string') this.setData({ debugPortrait: meta.portrait as string })
+          if (meta.fallback) {
+            console.warn('[index] AI fallback triggered:', meta.error || 'unknown reason')
+          }
         }
 
         this.setData({

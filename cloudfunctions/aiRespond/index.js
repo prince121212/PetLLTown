@@ -16,7 +16,7 @@ function now() {
 }
 
 function clampText(value, maxLength) {
-  const text = typeof value === 'string' ? value.trim() : ''
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
   return text.length > maxLength ? text.slice(0, maxLength) : text
 }
 
@@ -86,18 +86,156 @@ function fallbackReply(text) {
   }
 }
 
-function extractJson(text) {
-  const trimmed = typeof text === 'string' ? text.trim() : ''
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = fenced ? fenced[1].trim() : trimmed
-  const first = candidate.indexOf('{')
-  const last = candidate.lastIndexOf('}')
+function normalizeMemory(memory, source) {
+  if (!memory || typeof memory !== 'object') return null
 
-  if (first === -1 || last === -1 || last <= first) {
-    throw new Error('AI response is not JSON')
+  const content = clampText(memory.content, 30)
+  if (!content) return null
+
+  return {
+    ...memory,
+    content,
+    importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
+    source: source || memory.source || 'ai',
+  }
+}
+
+function parseMemoryCandidate(payload) {
+  if (!payload || typeof payload !== 'object') return null
+
+  const candidate = payload.memory
+  if (candidate === null || candidate === undefined) return null
+
+  if (typeof candidate === 'string') {
+    return {
+      content: candidate,
+      importance: 0.5,
+    }
   }
 
-  return JSON.parse(candidate.slice(first, last + 1))
+  if (typeof candidate === 'object') {
+    return candidate
+  }
+
+  return null
+}
+
+function unwrapCodeFence(text) {
+  const trimmed = typeof text === 'string' ? text.trim() : ''
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/i)
+  return fenced ? fenced[1].trim() : trimmed
+}
+
+function parseJsonCandidate(text) {
+  const first = text.indexOf('{')
+  const last = text.lastIndexOf('}')
+
+  if (first === -1 || last === -1 || last <= first) {
+    return null
+  }
+
+  const candidate = text.slice(first, last + 1).replace(/,\s*([}\]])/g, '$1')
+
+  try {
+    return JSON.parse(candidate)
+  } catch {
+    return null
+  }
+}
+
+function extractLooseFields(text) {
+  const lines = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (!lines.length) {
+    return null
+  }
+
+  const payload = {}
+
+  for (const line of lines) {
+    const match = line.match(/^(reply|回复|answer|emotion|nextAction|memory)\s*[:：]\s*(.+)$/i)
+    if (!match) continue
+
+    const key = match[1]
+    const value = match[2].trim()
+
+    if (key === 'memory') {
+      payload.memory = value
+    } else if (key.toLowerCase() === 'nextaction') {
+      payload.nextAction = value
+    } else if (key.toLowerCase() === 'emotion') {
+      payload.emotion = value
+    } else {
+      payload.reply = value
+    }
+  }
+
+  return payload.reply || payload.emotion || payload.nextAction || payload.memory ? payload : null
+}
+
+function cleanupPlainReply(text) {
+  const normalized = unwrapCodeFence(text)
+
+  if (!normalized) {
+    return ''
+  }
+
+  const loose = extractLooseFields(normalized)
+  if (loose && typeof loose.reply === 'string' && loose.reply.trim()) {
+    return clampText(loose.reply, 48)
+  }
+
+  const lines = normalized
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const firstLine = lines[0] || ''
+  return clampText(
+    firstLine
+      .replace(/^(reply|回复|回答|answer|assistant)\s*[:：]\s*/i, '')
+      .replace(/^["'“”‘’「」]+|["'“”‘’「」]+$/g, ''),
+    48,
+  )
+}
+
+function parseAiOutput(text) {
+  const normalized = unwrapCodeFence(text)
+
+  if (!normalized) {
+    return {
+      payload: null,
+      parseMode: 'empty',
+    }
+  }
+
+  const jsonPayload = parseJsonCandidate(normalized)
+  if (jsonPayload) {
+    return {
+      payload: jsonPayload,
+      parseMode: 'json',
+    }
+  }
+
+  const loosePayload = extractLooseFields(normalized)
+  if (loosePayload) {
+    return {
+      payload: loosePayload,
+      parseMode: 'loose',
+    }
+  }
+
+  return {
+    payload: {
+      reply: cleanupPlainReply(normalized),
+    },
+    parseMode: 'raw-text',
+  }
 }
 
 function normalizeAiPayload(payload, text) {
@@ -190,6 +328,7 @@ async function writeMemory(openId, memory) {
         _openId: openId,
         content: memory.content,
         importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
+        source: memory.source || 'ai',
         createdAt: now(),
       },
     })
@@ -204,6 +343,7 @@ async function writeMemory(openId, memory) {
             _openId: openId,
             content: memory.content,
             importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
+            source: memory.source || 'ai',
             createdAt: now(),
           },
         })
@@ -302,11 +442,70 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, ch
     },
   )
 
-  const payload = extractJson(result.text)
-  const data = normalizeAiPayload(payload, text)
+  const parsed = parseAiOutput(result.text)
+  const data = normalizeAiPayload(parsed.payload, text)
 
   return {
     ...data,
+    parseMode: parsed.parseMode,
+    usage: result.usage || {},
+    rawText: result.text || '',
+  }
+}
+
+async function extractMemoryWithAi(text, env, petStateInfo, chatHistory) {
+  const app = createCloudBaseApp(env)
+  const model = app.ai().createModel(PROVIDER)
+
+  const stateContext = petStateInfo
+    ? `\n当前状态：精力${petStateInfo.energy}/100，亲密度${petStateInfo.affection}/100，心情「${petStateInfo.mood}」，关系「${petStateInfo.relationship}」，时段「${petStateInfo.timeOfDay}」。`
+    : ''
+
+  const historyContext = Array.isArray(chatHistory) && chatHistory.length
+    ? `\n最近对话：\n${chatHistory.slice(-4).map((turn) => `用户：${turn.user || ''}\n宠物：${turn.pet || ''}`).join('\n')}`
+    : ''
+
+  const result = await model.generateText(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            '你是《宠物小小镇》的记忆提取器。',
+            '你的任务只有一个：判断用户刚刚说的话里，是否有值得长期记住的信息。',
+            '不要写回复，不要解释，不要分析过程。',
+            '只输出 JSON，字段只有 memory。',
+            'memory 为 null，或者为对象 {"content":"不超过20字的概括","importance":0到1之间的数字}。',
+            '值得记住的内容包括：稳定偏好、身份、习惯、长期关系、明确计划、持续性的情绪状态。',
+            '不值得记住的内容包括：打招呼、客套话、临时闲聊、单次感叹、没有信息量的重复。',
+            '如果用户说“我最喜欢打篮球”，应该记为喜欢打篮球这一类稳定偏好。',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: [
+            `用户刚刚说：${text}`,
+            stateContext,
+            historyContext,
+            '请只返回 JSON。',
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 120,
+    },
+    {
+      timeout: 10000,
+    },
+  )
+
+  const parsed = parseAiOutput(result.text)
+  const memory = normalizeMemory(parseMemoryCandidate(parsed.payload), 'ai-memory')
+
+  return {
+    memory,
+    parseMode: parsed.parseMode,
     usage: result.usage || {},
     rawText: result.text || '',
   }
@@ -376,6 +575,21 @@ exports.main = async (event = {}, context = {}) => {
     }
 
     const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null, memoryContext, event.chatHistory || [])
+    let memory = normalizeMemory(aiResult.memory, 'ai')
+    let memoryMeta = {
+      memorySource: memory ? memory.source : 'none',
+      memoryParseMode: aiResult.parseMode,
+    }
+
+    if (!memory) {
+      const memoryResult = await extractMemoryWithAi(text, env, event.petState || null, event.chatHistory || [])
+      memory = memoryResult.memory
+      memoryMeta = {
+        memorySource: memory ? memory.source : 'none',
+        memoryParseMode: memoryResult.parseMode,
+      }
+    }
+
     const data = {
       reply: aiResult.reply,
       emotion: aiResult.emotion,
@@ -383,8 +597,8 @@ exports.main = async (event = {}, context = {}) => {
       source: aiResult.source,
     }
 
-    if (aiResult.memory && openId) {
-      await writeMemory(openId, aiResult.memory)
+    if (memory && openId) {
+      await writeMemory(openId, memory)
     }
 
     const updatedMemories = openId ? await loadMemories(openId) : []
@@ -395,6 +609,10 @@ exports.main = async (event = {}, context = {}) => {
       emotion: data.emotion,
       nextAction: data.nextAction,
       replyLength: data.reply.length,
+      parseMode: aiResult.parseMode,
+      memorySource: memoryMeta.memorySource,
+      memoryParseMode: memoryMeta.memoryParseMode,
+      memoryImportance: memory ? memory.importance : undefined,
       usage: aiResult.usage,
       elapsedMs: Date.now() - startedAt,
     })
@@ -407,7 +625,10 @@ exports.main = async (event = {}, context = {}) => {
         provider: PROVIDER,
         memories: updatedMemories.map((m) => m.content),
         portrait: portraitText,
-        newMemory: aiResult.memory || null,
+        newMemory: memory || null,
+        parseMode: aiResult.parseMode,
+        memorySource: memoryMeta.memorySource,
+        memoryParseMode: memoryMeta.memoryParseMode,
       },
     }
   } catch (error) {
