@@ -690,8 +690,8 @@ button::after {
 
 .debug-toggle {
   position: absolute;
-  top: calc(var(--safe-top, 92rpx) + 10rpx);
-  right: 16rpx;
+  top: 50%;
+  right: 12rpx;
   z-index: 30;
   width: 48rpx;
   height: 48rpx;
@@ -706,11 +706,11 @@ button::after {
 
 .debug-panel {
   position: absolute;
-  top: calc(var(--safe-top, 92rpx) + 70rpx);
+  top: calc(var(--safe-top, 92rpx) + 90rpx);
   right: 12rpx;
   z-index: 30;
   width: 280rpx;
-  max-height: 70vh;
+  max-height: 60vh;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.75);
   border: 1rpx solid rgba(255, 255, 255, 0.1);

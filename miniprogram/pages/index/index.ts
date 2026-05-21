@@ -292,6 +292,9 @@ let soulTickTimer = 0
 let stateSavePending = false
 let stateSaveTimer = 0
 let drawerAutoCloseTimer = 0
+let chatHistory: Array<{ user: string; pet: string }> = []
+const MAX_CHAT_HISTORY = 5
+const CHAT_TIMEOUT_MS = 300000
 let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
@@ -512,6 +515,7 @@ Component({
       this.stopAlphaVideo()
       this.stopSoulTick()
       this.savePetStateNow()
+      chatHistory = []
     },
   },
 
@@ -1559,7 +1563,11 @@ Component({
 
     handleListenTouchEnd() {
       this.setData({ orbPressed: false })
-      if (!recorder || this.data.voiceStatus !== 'recording' || recordingStopping) return
+      if (!recorder || recordingStopping) return
+      if (this.data.voiceStatus !== 'recording') {
+        recorder.stop()
+        return
+      }
 
       recordingStopping = true
       this.finishRealtimeAsr()
@@ -1843,11 +1851,17 @@ Component({
     async requestPetReply(text: string) {
       try {
         const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
+
+        if (petState.lastInteractionAt && (Date.now() - petState.lastInteractionAt) > CHAT_TIMEOUT_MS) {
+          chatHistory = []
+        }
+
         const response = await wx.cloud.callFunction({
           name: 'aiRespond',
           data: {
             text,
             petId: selected.id,
+            chatHistory: chatHistory.slice(-MAX_CHAT_HISTORY),
             petState: {
               energy: Math.round(petState.energy),
               affection: Math.round(petState.affection),
@@ -1890,6 +1904,8 @@ Component({
           petState = setMood(petState, moodMap[emotion] || '开心')
         }
         this.applyAiNextAction(nextAction)
+        chatHistory.push({ user: text, pet: reply })
+        if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory.shift()
         this.syncPanelUI()
       } catch (error) {
         console.warn('[index] ai response failed:', error)

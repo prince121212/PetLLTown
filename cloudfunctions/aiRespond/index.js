@@ -108,10 +108,14 @@ function normalizeAiPayload(payload, text) {
   const nextAction = validActions.includes(payload && payload.nextAction) ? payload.nextAction : fallback.nextAction
 
   let memory = null
-  if (payload && payload.memory && typeof payload.memory === 'object') {
-    const content = clampText(payload.memory.content, 30)
-    const entity = clampText(payload.memory.entity, 10)
-    if (content) memory = { content, entity: entity || '' }
+  if (payload && payload.memory) {
+    if (typeof payload.memory === 'string') {
+      memory = { content: payload.memory, importance: 0.5 }
+    } else if (typeof payload.memory === 'object') {
+      const content = clampText(payload.memory.content, 30)
+      const importance = typeof payload.memory.importance === 'number' ? payload.memory.importance : 0.5
+      if (content) memory = { content, importance }
+    }
   }
 
   return {
@@ -138,7 +142,8 @@ async function writeAiLog(log) {
 
 const MEMORIES_COLLECTION = 'user_memories'
 const PROFILES_COLLECTION = 'user_profiles'
-const MAX_MEMORIES = 15
+const MAX_MEMORIES = 8
+const PORTRAIT_TRIGGER_COUNT = 3
 
 async function loadMemories(openId) {
   try {
@@ -165,44 +170,47 @@ async function loadPortrait(openId) {
 async function writeMemory(openId, memory) {
   if (!memory || !memory.content) return
 
-  const existing = await loadMemories(openId)
+  try {
+    const existing = await loadMemories(openId)
 
-  if (memory.entity) {
-    const match = existing.find((m) => m.entity && m.entity === memory.entity)
-    if (match) {
-      await db.collection(MEMORIES_COLLECTION).doc(match._id).update({
-        data: { content: memory.content, createdAt: now(), importance: Math.max(match.importance || 0.4, computeImportance(memory.content)) },
-      })
-      return
+    if (existing.length >= MAX_MEMORIES) {
+      const scored = existing.map((m) => ({
+        ...m,
+        score: (m.importance || 0.4) + Math.max(0, 1 - (Date.now() - new Date(m.createdAt).getTime()) / (72 * 3600 * 1000)),
+      }))
+      scored.sort((a, b) => a.score - b.score)
+      const toRemove = scored[0]
+      if (toRemove && toRemove._id) {
+        await db.collection(MEMORIES_COLLECTION).doc(toRemove._id).remove()
+      }
     }
-  }
 
-  if (existing.length >= MAX_MEMORIES) {
-    const lowest = existing[existing.length - 1]
-    if (lowest && lowest._id) {
-      await db.collection(MEMORIES_COLLECTION).doc(lowest._id).remove()
+    await db.collection(MEMORIES_COLLECTION).add({
+      data: {
+        _openId: openId,
+        content: memory.content,
+        importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
+        createdAt: now(),
+      },
+    })
+
+    await checkPortraitUpdate(openId)
+  } catch (error) {
+    if (error && error.message && error.message.includes('DATABASE_COLLECTION_NOT_EXIST')) {
+      try {
+        await db.createCollection(MEMORIES_COLLECTION)
+        await db.collection(MEMORIES_COLLECTION).add({
+          data: {
+            _openId: openId,
+            content: memory.content,
+            importance: typeof memory.importance === 'number' ? Math.min(1, Math.max(0, memory.importance)) : 0.5,
+            createdAt: now(),
+          },
+        })
+      } catch {}
     }
+    console.warn('[aiRespond] writeMemory failed:', error && error.message ? error.message : error)
   }
-
-  await db.collection(MEMORIES_COLLECTION).add({
-    data: {
-      _openId: openId,
-      content: memory.content,
-      entity: memory.entity || '',
-      importance: computeImportance(memory.content),
-      createdAt: now(),
-    },
-  })
-
-  await checkPortraitUpdate(openId)
-}
-
-function computeImportance(content) {
-  let score = 0.4
-  if (/喜欢|讨厌|最爱|不喜欢|爱吃/.test(content)) score += 0.2
-  if (/难过|生气|想哭|幸福|开心|焦虑/.test(content)) score += 0.2
-  if (/叫|名|岁|工作|家|养了|住在/.test(content)) score += 0.15
-  return Math.min(score, 1.0)
 }
 
 async function checkPortraitUpdate(openId) {
@@ -222,7 +230,7 @@ async function checkPortraitUpdate(openId) {
     }
 
     const count = (profile.memoryCountSinceUpdate || 0) + 1
-    if (count >= 5) {
+    if (count >= PORTRAIT_TRIGGER_COUNT) {
       await db.collection(PROFILES_COLLECTION).doc(openId).update({
         data: { memoryCountSinceUpdate: 0, _needsPortraitUpdate: true },
       })
@@ -243,7 +251,7 @@ function createCloudBaseApp(env) {
   })
 }
 
-async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext) {
+async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, chatHistory) {
   const app = createCloudBaseApp(env)
   const model = app.ai().createModel(PROVIDER)
 
@@ -272,17 +280,18 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext) {
             '如果用户说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
             '如果用户的话像是没说完或者你想追问，nextAction 用 listening。',
             '',
-            'memory 字段规则：如果用户这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","entity":"相关实体名"}。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
+            'memory 字段规则：如果用户这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","importance":0到1的重要性}。长期偏好和核心事实给0.7-0.9，临时情绪和近期计划给0.3-0.5。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
             stateContext,
             memoryContext,
           ].join('\n'),
         },
+        ...(Array.isArray(chatHistory) ? chatHistory.slice(-5).flatMap((turn) => [
+          { role: 'user', content: turn.user || '' },
+          { role: 'assistant', content: turn.pet || '' },
+        ]) : []),
         {
           role: 'user',
-          content: JSON.stringify({
-            petId,
-            userText: text,
-          }),
+          content: text,
         },
       ],
       temperature: 0.8,
@@ -366,7 +375,7 @@ exports.main = async (event = {}, context = {}) => {
       memoryContext = '\n' + parts.join('\n')
     }
 
-    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null, memoryContext)
+    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null, memoryContext, event.chatHistory || [])
     const data = {
       reply: aiResult.reply,
       emotion: aiResult.emotion,
@@ -375,8 +384,10 @@ exports.main = async (event = {}, context = {}) => {
     }
 
     if (aiResult.memory && openId) {
-      writeMemory(openId, aiResult.memory).catch(() => undefined)
+      await writeMemory(openId, aiResult.memory)
     }
+
+    const updatedMemories = openId ? await loadMemories(openId) : []
 
     await writeAiLog({
       ...baseLog,
@@ -394,7 +405,7 @@ exports.main = async (event = {}, context = {}) => {
       meta: {
         model: MODEL,
         provider: PROVIDER,
-        memories: memories.map((m) => m.content),
+        memories: updatedMemories.map((m) => m.content),
         portrait: portraitText,
         newMemory: aiResult.memory || null,
       },
