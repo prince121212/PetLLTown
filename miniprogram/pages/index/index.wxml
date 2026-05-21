@@ -96,6 +96,16 @@
         <text class="debug-text">{{debugPortrait || '（空）'}}</text>
       </view>
       <view class="debug-section">
+        <text class="debug-title">画像状态</text>
+        <view class="debug-meta">
+          <text class="debug-text">本轮触发：{{debugPortraitTriggered ? '是' : '否'}}</text>
+          <text class="debug-text">本轮更新：{{debugPortraitUpdated ? '是' : '否'}}</text>
+          <text class="debug-text">累计计数：{{debugPortraitMemoryCount}}</text>
+          <text class="debug-text">记忆来源：{{debugMemorySource || '（无）'}}</text>
+          <text class="debug-text">解析模式：{{debugMemoryParseMode || '（无）'}}</text>
+        </view>
+      </view>
+      <view class="debug-section">
         <text class="debug-title">短期记忆 ({{debugMemories.length}})</text>
         <view class="debug-memories">
           <text wx:for="{{debugMemories}}" wx:key="*this" class="debug-memory-item">{{item}}</text>

@@ -63,6 +63,10 @@ interface PageData {
   moodText: string
   debugMemories: string[]
   debugPortrait: string
+  debugPortraitUpdated: boolean
+  debugPortraitMemoryCount: number
+  debugMemorySource: string
+  debugMemoryParseMode: string
   debugQueue: string[]
   debugOpen: boolean
   activePetIndex: number
@@ -98,6 +102,12 @@ interface AiRespondResult {
   }
   meta?: {
     fallback?: boolean
+    memories?: string[]
+    portrait?: string
+    portraitUpdated?: boolean
+    portraitMemoryCount?: number
+    memorySource?: string
+    memoryParseMode?: string
   }
 }
 
@@ -484,6 +494,10 @@ Component({
     moodText: '开心',
     debugMemories: [] as string[],
     debugPortrait: '',
+    debugPortraitUpdated: false,
+    debugPortraitMemoryCount: 0,
+    debugMemorySource: '',
+    debugMemoryParseMode: '',
     debugQueue: [] as string[],
     debugOpen: false,
     activePetIndex: 0,
@@ -1476,6 +1490,10 @@ Component({
         manifestActions: petManifestActions.map((a) => `${a.id}(${a.videoUrls ? a.videoUrls.length : 0})`),
         debugMemories: this.data.debugMemories,
         debugPortrait: this.data.debugPortrait,
+        debugPortraitUpdated: this.data.debugPortraitUpdated,
+        debugPortraitMemoryCount: this.data.debugPortraitMemoryCount,
+        debugMemorySource: this.data.debugMemorySource,
+        debugMemoryParseMode: this.data.debugMemoryParseMode,
       }, null, 2))
     },
 
@@ -1909,6 +1927,10 @@ Component({
         if (meta) {
           if (Array.isArray(meta.memories)) this.setData({ debugMemories: meta.memories as string[] })
           if (typeof meta.portrait === 'string') this.setData({ debugPortrait: meta.portrait as string })
+          if (typeof meta.portraitUpdated === 'boolean') this.setData({ debugPortraitUpdated: meta.portraitUpdated })
+          if (typeof meta.portraitMemoryCount === 'number') this.setData({ debugPortraitMemoryCount: meta.portraitMemoryCount })
+          if (typeof meta.memorySource === 'string') this.setData({ debugMemorySource: meta.memorySource })
+          if (typeof meta.memoryParseMode === 'string') this.setData({ debugMemoryParseMode: meta.memoryParseMode })
           if (meta.fallback) {
             console.warn('[index] AI fallback triggered:', meta.error || 'unknown reason')
           }

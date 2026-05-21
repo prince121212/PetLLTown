@@ -11,7 +11,12 @@ const PROFILES_COLLECTION = 'user_profiles'
 
 exports.main = async (event = {}) => {
   const wxContext = cloud.getWXContext()
-  const openId = wxContext.OPENID
+  const openId = (
+    (typeof event.openId === 'string' && event.openId.trim()) ||
+    (event.userInfo && typeof event.userInfo.openId === 'string' && event.userInfo.openId.trim()) ||
+    wxContext.OPENID ||
+    ''
+  )
   if (!openId) return { ok: false, error: { message: '无法获取用户身份' } }
 
   const env = wxContext.ENV || process.env.TCB_ENV || ''

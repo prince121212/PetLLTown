@@ -740,6 +740,12 @@ button::after {
   line-height: 1.4;
 }
 
+.debug-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
 .debug-queue {
   display: flex;
   flex-wrap: wrap;

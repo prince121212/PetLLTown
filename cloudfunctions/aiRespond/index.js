@@ -333,7 +333,7 @@ async function writeMemory(openId, memory) {
       },
     })
 
-    await checkPortraitUpdate(openId)
+    return await checkPortraitUpdate(openId)
   } catch (error) {
     if (error && error.message && error.message.includes('DATABASE_COLLECTION_NOT_EXIST')) {
       try {
@@ -347,9 +347,11 @@ async function writeMemory(openId, memory) {
             createdAt: now(),
           },
         })
+        return await checkPortraitUpdate(openId)
       } catch {}
     }
     console.warn('[aiRespond] writeMemory failed:', error && error.message ? error.message : error)
+    return null
   }
 }
 
@@ -366,7 +368,12 @@ async function checkPortraitUpdate(openId) {
           data: { _id: openId, _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
         })
       }
-      return
+      return {
+        triggered: false,
+        updated: false,
+        portrait: '',
+        memoryCountSinceUpdate: 1,
+      }
     }
 
     const count = (profile.memoryCountSinceUpdate || 0) + 1
@@ -374,14 +381,47 @@ async function checkPortraitUpdate(openId) {
       await db.collection(PROFILES_COLLECTION).doc(openId).update({
         data: { memoryCountSinceUpdate: 0, _needsPortraitUpdate: true },
       })
-      cloud.callFunction({ name: 'updatePortrait', data: {} }).catch(() => undefined)
+      let updateResult = null
+      try {
+        updateResult = await cloud.callFunction({ name: 'updatePortrait', data: { openId } })
+      } catch (error) {
+        console.warn('[aiRespond] updatePortrait call failed:', error && error.message ? error.message : error)
+      }
+
+      const updatedProfile = await loadPortrait(openId)
+      const portrait = updatedProfile && typeof updatedProfile.portrait === 'string'
+        ? updatedProfile.portrait.trim()
+        : ''
+
+      const portraitFromResult = updateResult
+        && updateResult.result
+        && updateResult.result.data
+        && typeof updateResult.result.data.portrait === 'string'
+        ? updateResult.result.data.portrait.trim()
+        : ''
+
+      return {
+        triggered: true,
+        updated: Boolean(portrait || portraitFromResult),
+        portrait: portrait || portraitFromResult,
+        memoryCountSinceUpdate: updatedProfile && typeof updatedProfile.memoryCountSinceUpdate === 'number'
+          ? updatedProfile.memoryCountSinceUpdate
+          : 0,
+      }
     } else {
       await db.collection(PROFILES_COLLECTION).doc(openId).update({
         data: { memoryCountSinceUpdate: count },
       })
+      return {
+        triggered: false,
+        updated: false,
+        portrait: profile.portrait || '',
+        memoryCountSinceUpdate: count,
+      }
     }
   } catch {
     // ignore
+    return null
   }
 }
 
@@ -563,7 +603,7 @@ exports.main = async (event = {}, context = {}) => {
     const openId = wxContext.OPENID || ''
     const memories = openId ? await loadMemories(openId) : []
     const profile = openId ? await loadPortrait(openId) : null
-    const portraitText = profile && profile.portrait ? profile.portrait : ''
+    let portraitText = profile && profile.portrait ? profile.portrait : ''
 
     let memoryContext = ''
     if (portraitText || memories.length) {
@@ -597,8 +637,12 @@ exports.main = async (event = {}, context = {}) => {
       source: aiResult.source,
     }
 
+    let portraitUpdateInfo = null
     if (memory && openId) {
-      await writeMemory(openId, memory)
+      portraitUpdateInfo = await writeMemory(openId, memory)
+      if (portraitUpdateInfo && typeof portraitUpdateInfo.portrait === 'string' && portraitUpdateInfo.portrait.trim()) {
+        portraitText = portraitUpdateInfo.portrait.trim()
+      }
     }
 
     const updatedMemories = openId ? await loadMemories(openId) : []
@@ -613,6 +657,8 @@ exports.main = async (event = {}, context = {}) => {
       memorySource: memoryMeta.memorySource,
       memoryParseMode: memoryMeta.memoryParseMode,
       memoryImportance: memory ? memory.importance : undefined,
+      portraitUpdated: portraitUpdateInfo ? portraitUpdateInfo.updated : false,
+      portraitMemoryCount: portraitUpdateInfo ? portraitUpdateInfo.memoryCountSinceUpdate : undefined,
       usage: aiResult.usage,
       elapsedMs: Date.now() - startedAt,
     })
@@ -629,6 +675,9 @@ exports.main = async (event = {}, context = {}) => {
         parseMode: aiResult.parseMode,
         memorySource: memoryMeta.memorySource,
         memoryParseMode: memoryMeta.memoryParseMode,
+        portraitUpdated: portraitUpdateInfo ? portraitUpdateInfo.updated : false,
+        portraitTriggered: portraitUpdateInfo ? portraitUpdateInfo.triggered : false,
+        portraitMemoryCount: portraitUpdateInfo ? portraitUpdateInfo.memoryCountSinceUpdate : undefined,
       },
     }
   } catch (error) {
