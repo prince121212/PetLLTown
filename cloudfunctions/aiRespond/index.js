@@ -283,6 +283,17 @@ const PROFILES_COLLECTION = 'user_profiles'
 const MAX_MEMORIES = 8
 const PORTRAIT_TRIGGER_COUNT = 3
 
+async function ensureCollection(name) {
+  try {
+    await db.createCollection(name)
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message && !message.includes('already exist')) {
+      console.warn('[aiRespond] ensureCollection failed:', name, message)
+    }
+  }
+}
+
 async function loadMemories(openId) {
   try {
     const result = await db.collection(MEMORIES_COLLECTION)
@@ -357,6 +368,7 @@ async function writeMemory(openId, memory) {
 
 async function checkPortraitUpdate(openId) {
   try {
+    await ensureCollection(PROFILES_COLLECTION)
     let profile = await loadPortrait(openId)
     if (!profile) {
       try {
@@ -364,9 +376,14 @@ async function checkPortraitUpdate(openId) {
           data: { _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
         })
       } catch {
-        await db.collection(PROFILES_COLLECTION).add({
-          data: { _id: openId, _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
-        })
+        try {
+          await db.collection(PROFILES_COLLECTION).add({
+            data: { _id: openId, _openId: openId, portrait: '', memoryCountSinceUpdate: 1, lastUpdatedAt: now() },
+          })
+        } catch (error) {
+          console.warn('[aiRespond] create portrait profile failed:', error && error.message ? error.message : error)
+          return null
+        }
       }
       return {
         triggered: false,

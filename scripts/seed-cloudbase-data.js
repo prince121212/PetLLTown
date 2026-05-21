@@ -46,6 +46,8 @@ const seedCollections = [
   'voice_logs',
   'ai_logs',
   'admin_audit_logs',
+  'user_memories',
+  'user_profiles',
 ]
 
 const manager = CloudBaseManager.init({

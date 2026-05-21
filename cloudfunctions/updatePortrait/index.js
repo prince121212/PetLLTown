@@ -9,6 +9,17 @@ const MODEL = process.env.AI_MODEL || 'hy3-preview'
 const MEMORIES_COLLECTION = 'user_memories'
 const PROFILES_COLLECTION = 'user_profiles'
 
+async function ensureCollection(name) {
+  try {
+    await db.createCollection(name)
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message && !message.includes('already exist')) {
+      console.warn('[updatePortrait] ensureCollection failed:', name, message)
+    }
+  }
+}
+
 exports.main = async (event = {}) => {
   const wxContext = cloud.getWXContext()
   const openId = (
@@ -22,11 +33,13 @@ exports.main = async (event = {}) => {
   const env = wxContext.ENV || process.env.TCB_ENV || ''
 
   try {
+    await ensureCollection(PROFILES_COLLECTION)
     const profile = await db.collection(PROFILES_COLLECTION).doc(openId).get().then((r) => r.data).catch(() => null)
     if (!profile || !profile._needsPortraitUpdate) {
       return { ok: true, data: { skipped: true } }
     }
 
+    await ensureCollection(MEMORIES_COLLECTION)
     const memoriesResult = await db.collection(MEMORIES_COLLECTION)
       .where({ _openId: openId })
       .orderBy('importance', 'desc')
