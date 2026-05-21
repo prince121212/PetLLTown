@@ -303,6 +303,7 @@ let stateSavePending = false
 let stateSaveTimer = 0
 let drawerAutoCloseTimer = 0
 let chatHistory: Array<{ user: string; pet: string }> = []
+let chatSessionId = 0
 const MAX_CHAT_HISTORY = 5
 const CHAT_TIMEOUT_MS = 300000
 let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
@@ -1564,6 +1565,8 @@ Component({
       if (!selected) return
 
       this.savePetStateNow()
+      chatSessionId += 1
+      chatHistory = []
 
       activePetId = selected.id
       activePetVideoUrl = (selected && selected.videoUrl) || bootstrapConfig.homeMedia.petVideoUrl
@@ -1579,6 +1582,9 @@ Component({
       this.enterHomePage({
         petName: normalizePetDisplayName(selected.name),
         voiceHint: buildIdleVoiceHint(selected.name),
+        transcribedText: '',
+        petReply: '',
+        voiceStatus: 'idle',
         settingsThumb: (selected && selected.thumbUrl) || '',
       })
     },
@@ -1928,6 +1934,10 @@ Component({
     async requestPetReply(text: string) {
       try {
         const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
+        const requestPetId = selected.id
+        const requestPetName = normalizePetDisplayName(selected.name)
+        const requestSessionId = chatSessionId
+        const history = chatHistory.slice(-MAX_CHAT_HISTORY)
 
         if (petState.lastInteractionAt && (Date.now() - petState.lastInteractionAt) > CHAT_TIMEOUT_MS) {
           chatHistory = []
@@ -1937,8 +1947,9 @@ Component({
           name: 'aiRespond',
           data: {
             text,
-            petId: selected.id,
-            chatHistory: chatHistory.slice(-MAX_CHAT_HISTORY),
+            petId: requestPetId,
+            petName: requestPetName,
+            chatHistory: history,
             petState: {
               energy: Math.round(petState.energy),
               affection: Math.round(petState.affection),
@@ -1948,6 +1959,16 @@ Component({
             },
           },
         })
+
+        if (requestSessionId !== chatSessionId || activePetId !== requestPetId) {
+          console.warn('[index] ignore stale ai response:', {
+            requestPetId,
+            activePetId,
+            requestSessionId,
+            currentSessionId: chatSessionId,
+          })
+          return
+        }
 
         if (!isAiRespondResult(response.result) || response.result.ok !== true) {
           const message = isAiRespondResult(response.result) && response.result.error && response.result.error.message
@@ -1979,10 +2000,11 @@ Component({
 
         this.setData({
           voiceStatus: 'success',
-          voiceHint: buildRespondingVoiceHint(selected.name, Boolean(meta && meta.fallback)),
+          voiceHint: buildRespondingVoiceHint(requestPetName, Boolean(meta && meta.fallback)),
           petReply: reply,
         })
         petState = soulApplyEvent(petState, 'ai_replied')
+        petState.lastInteractionAt = Date.now()
         if (emotion) {
           const moodMap: Record<string, string> = { happy: '开心', curious: '好奇', gentle: '温柔', sleepy: '困了', excited: '兴奋' }
           petState = setMood(petState, moodMap[emotion] || '开心')
@@ -1992,10 +2014,16 @@ Component({
         if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory.shift()
         this.syncPanelUI()
       } catch (error) {
+        const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
+        const requestPetId = selected.id
+        const requestSessionId = chatSessionId
+        if (requestSessionId !== chatSessionId || activePetId !== requestPetId) {
+          return
+        }
         console.warn('[index] ai response failed:', error)
         this.setData({
           voiceStatus: 'success',
-          voiceHint: buildHeardVoiceHint(this.data.petName),
+          voiceHint: buildHeardVoiceHint(normalizePetDisplayName(selected.name)),
           petReply: '我听到啦，先陪你待一会儿。',
         })
         petState = soulApplyEvent(petState, 'ai_replied')

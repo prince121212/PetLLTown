@@ -489,9 +489,13 @@ function createCloudBaseApp(env) {
   })
 }
 
-async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, chatHistory) {
+async function callCloudBaseAi(text, petId, petName, env, petStateInfo, memoryContext, chatHistory) {
   const app = createCloudBaseApp(env)
   const model = app.ai().createModel(PROVIDER)
+  const safePetName = typeof petName === 'string' && petName.trim() ? petName.trim() : ''
+  const petIdentityLine = safePetName
+    ? `你当前扮演的宠物是「${safePetName}」，必须始终以这只宠物的身份说话，不要混淆成别的宠物。`
+    : '你当前扮演一只宠物，必须始终以当前宠物的身份说话，不要混淆成别的宠物。'
 
   const stateContext = petStateInfo
     ? `\n当前状态：精力${petStateInfo.energy}/100，亲密度${petStateInfo.affection}/100，心情「${petStateInfo.mood}」，关系「${petStateInfo.relationship}」，时段「${petStateInfo.timeOfDay}」。根据这些状态调整你的语气和回复。精力低时表现困意，亲密度高时更撒娇。`
@@ -505,6 +509,7 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, ch
           role: 'system',
           content: [
             '你是微信小程序《宠物小小镇》里的小宠物。',
+            petIdentityLine,
             '你会认真听主人说话，回复必须短、亲近、有生命感，像一只陪伴型小宠物。',
             '只输出 JSON，不要输出 Markdown，不要解释。',
             'JSON 字段：reply 字符串，emotion 字符串，nextAction 字符串，memory 对象（可选）。',
@@ -514,19 +519,20 @@ async function callCloudBaseAi(text, petId, env, petStateInfo, memoryContext, ch
             '  idle — 回到日常待机（默认，大部分情况用这个）',
             '  sleep-enter — 去睡觉（用户说晚安、说累了、说让你休息时）',
             '  listening — 继续倾听（用户话没说完、你想让用户继续说时）',
-            '根据用户说的内容智能选择 nextAction，不要总是 idle。',
+            '根据主人说的内容智能选择 nextAction，不要总是 idle。',
             '如果主人说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
             '如果主人的话像是没说完或者你想追问，nextAction 用 listening。',
             '',
             'memory 字段规则：如果主人这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","importance":0到1的重要性}。长期偏好和核心事实给0.7-0.9，临时情绪和近期计划给0.3-0.5。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
             '记忆内容必须使用“主人”视角，例如“主人最喜欢粉色”“主人喜欢打篮球”，不要写成“用户最喜欢…”。',
+            safePetName ? `如果回复里要提到自己的名字，只能使用「${safePetName}」。` : '',
             stateContext,
             memoryContext,
           ].join('\n'),
         },
         ...(Array.isArray(chatHistory) ? chatHistory.slice(-5).flatMap((turn) => [
           { role: 'user', content: turn.user || '' },
-          { role: 'assistant', content: turn.pet || '' },
+          { role: 'assistant', content: safePetName ? `${safePetName}：${turn.pet || ''}` : (turn.pet || '') },
         ]) : []),
         {
           role: 'user',
@@ -617,9 +623,11 @@ exports.main = async (event = {}, context = {}) => {
   const env = wxContext.ENV || process.env.TCB_ENV || process.env.SCF_NAMESPACE || ''
   const text = clampText(event.text, MAX_TEXT_LENGTH)
   const petId = clampText(event.petId, 64) || DEFAULT_PET_ID
+  const petName = clampText(event.petName, 64)
   const baseLog = {
     _openid: wxContext.OPENID,
     petId,
+    petName,
     textLength: text.length,
     provider: PROVIDER,
     model: MODEL,
@@ -678,7 +686,7 @@ exports.main = async (event = {}, context = {}) => {
       memoryContext = '\n' + parts.join('\n')
     }
 
-    const aiResult = await callCloudBaseAi(text, petId, env, event.petState || null, memoryContext, event.chatHistory || [])
+    const aiResult = await callCloudBaseAi(text, petId, petName, env, event.petState || null, memoryContext, event.chatHistory || [])
     let memory = normalizeMemory(aiResult.memory, 'ai')
     let memoryMeta = {
       memorySource: memory ? memory.source : 'none',
