@@ -14,6 +14,7 @@
     "deploy:voice": "node scripts/deploy-voice-function.js",
     "deploy:asr-realtime": "node scripts/deploy-asr-realtime-function.js",
     "deploy:ai": "node scripts/deploy-ai-function.js",
+    "deploy:auth-login": "node scripts/deploy-auth-login-function.js",
     "deploy:admin-config": "node scripts/deploy-admin-config-function.js",
     "upload:media": "node scripts/upload-media-assets.js",
     "admin:dev": "npm --prefix admin run dev",
@@ -29,5 +30,8 @@
     "miniprogram-api-typings": "^2.8.3-1",
     "tencentcloud-sdk-nodejs-asr": "^4.1.205",
     "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "lottie-miniprogram": "^1.0.12"
   }
 }

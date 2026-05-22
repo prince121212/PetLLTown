@@ -9,6 +9,7 @@ const db = cloud.database()
 const AsrClient = asr.asr.v20190614.Client
 const MAX_DURATION_MS = 15000
 const MAX_FILE_SIZE = 3 * 1024 * 1024
+const USERS_COLLECTION = 'users'
 
 function now() {
   return new Date().toISOString()
@@ -78,6 +79,54 @@ async function writeVoiceLog(log) {
     })
   } catch (error) {
     console.warn('[voiceTranscribe] write voice log failed:', error && error.message ? error.message : error)
+  }
+}
+
+async function ensureCollection(name) {
+  try {
+    await db.createCollection(name)
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message && !message.includes('already exist')) {
+      console.warn('[voiceTranscribe] ensureCollection failed:', name, message)
+    }
+  }
+}
+
+async function touchUser(openId, extra = {}) {
+  if (!openId) return
+
+  const timestamp = now()
+  try {
+    await db.collection(USERS_COLLECTION).doc(openId).update({
+      data: {
+        _openId: openId,
+        openId,
+        lastActiveAt: timestamp,
+        updatedAt: timestamp,
+        ...extra,
+      },
+    })
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message.includes('DATABASE_COLLECTION_NOT_EXIST') || message.includes('not exist')) {
+      try {
+        await ensureCollection(USERS_COLLECTION)
+        await db.collection(USERS_COLLECTION).doc(openId).set({
+          data: {
+            _openId: openId,
+            openId,
+            loginProvider: 'wechat-miniprogram',
+            firstLoginAt: timestamp,
+            lastLoginAt: timestamp,
+            lastActiveAt: timestamp,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            ...extra,
+          },
+        })
+      } catch {}
+    }
   }
 }
 
@@ -179,6 +228,7 @@ exports.main = async (event = {}) => {
       textLength: text.length,
       elapsedMs: Date.now() - startedAt,
     })
+    await touchUser(wxContext.OPENID, { lastVoiceAt: now() })
 
     return {
       ok: true,

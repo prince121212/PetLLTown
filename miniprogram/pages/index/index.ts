@@ -22,6 +22,18 @@ import {
   tick as soulTick,
   updateConsecutiveDays,
 } from '../../utils/soulEngine'
+import {
+  AuthSession,
+  clearAuthSession,
+  clearCachedAvatarUrl,
+  getCachedAuthSession,
+  getCachedAvatarUrl,
+  loginWithWechat,
+  maskOpenId,
+  saveCachedAvatarUrl,
+  updateWechatProfile,
+  validateCachedAuthSession,
+} from '../../utils/auth'
 
 type VoiceStatus = 'idle' | 'recording' | 'uploading' | 'transcribing' | 'thinking' | 'success' | 'error'
 type VoiceRecognitionProvider = 'wechat-si' | 'cloud-asr'
@@ -50,6 +62,9 @@ interface PageData {
     title: string
     copy: string
   }
+  logoutButton: {
+    enabled: boolean
+  }
   voiceStatus: VoiceStatus
   voiceHint: string
   transcribedText: string
@@ -64,6 +79,7 @@ interface PageData {
   moodText: string
   debugMemories: string[]
   debugPortrait: string
+  debugPortraitTriggered: boolean
   debugPortraitUpdated: boolean
   debugPortraitMemoryCount: number
   debugMemorySource: string
@@ -72,6 +88,15 @@ interface PageData {
   debugOpen: boolean
   activePetIndex: number
   activeRoomIndex: number
+  authReady: boolean
+  isLoggedIn: boolean
+  loginOpenId: string
+  loginHint: string
+  loginLoading: boolean
+  userAvatarUrl: string
+  userNickName: string
+  nickNameInput: string
+  profileSaving: boolean
 }
 
 interface VoiceTranscribeResult {
@@ -105,6 +130,7 @@ interface AiRespondResult {
     fallback?: boolean
     memories?: string[]
     portrait?: string
+    portraitTriggered?: boolean
     portraitUpdated?: boolean
     portraitMemoryCount?: number
     memorySource?: string
@@ -291,15 +317,27 @@ let petVideoFrameRequest = 0
 let petVideoStartTimer = 0
 let petVideoFrameData: Uint8Array | null = null
 let petVideoSourceCache: Record<string, string> = {}
+let petVideoSourcePendingCache: Record<string, Promise<string>> = {}
 let petVideoStartingUrl = ''
 let petVideoActiveUrl = ''
 let petVideoNextDecoder: PetVideoDecoder | null = null
 let petVideoNextReady = false
+let petVideoNextReadyPromise: Promise<void> | null = null
+let petVideoNextReadyResolve: (() => void) | null = null
+let petVideoNextSceneId = ''
+let petVideoNextUrl = ''
+let petVideoNextWarmFrame: PetVideoFrameData | null = null
+let petVideoNextWarming = false
 let petVideoFrameIndex = 0
 const PET_VIDEO_TRIM_FRAMES = 5
+const PET_VIDEO_NEXT_READY_WAIT_MS = 120
+const PET_VIDEO_WARM_MAX_EMPTY_READS = 30
+const PET_VIDEO_DOWNLOAD_RETRY_DELAYS_MS = [180, 480, 900]
+const PET_VIDEO_RETRY_SCENE_DELAY_MS = 300
 let petVideoFirstFrameLogged = false
 let petVideoFrameShapeWarned = false
 let petVideoFramePending = false
+let petVideoFramePendingDecoder: PetVideoDecoder | null = null
 let petVideoAlphaSamplesLogged = false
 let petVideoRenderPaused = false
 let activePetVideoUrl = ''
@@ -319,6 +357,8 @@ const CHAT_TIMEOUT_MS = 300000
 let petAudioContext: WechatMiniprogram.InnerAudioContext | null = null
 let activeRoomId = FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId
 let bootstrapConfig = FALLBACK_BOOTSTRAP_CONFIG
+let authSession: AuthSession | null = null
+let voiceLoginPending = false
 let recorder: WechatMiniprogram.RecorderManager | null = null
 let recorderReady = false
 let recordingStartedAt = 0
@@ -399,6 +439,12 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value) && typeof (value as Promise<unknown>).then === 'function'
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
 function buildPageData(config = bootstrapConfig): Partial<PageData> {
   const pets = config.pets.filter((pet) => pet.enabled !== false)
   const rooms = config.rooms.filter((room) => room.enabled !== false)
@@ -425,6 +471,7 @@ function buildPageData(config = bootstrapConfig): Partial<PageData> {
     pickerRooms: buildPickerRooms(rooms),
     settings: config.settings.items.filter((item) => item.visible !== false),
     miniAd: config.settings.miniAd,
+    logoutButton: config.settings.logoutButton,
     activePetIndex: Math.max(
       0,
       pets.findIndex((pet) => pet.id === config.defaultPetId),
@@ -479,8 +526,10 @@ function normalizePetDisplayName(name: string): string {
   return trimmed || '宠物'
 }
 
-function buildIdleVoiceHint(name: string): string {
-  return `按住和${normalizePetDisplayName(name)}说话`
+function buildIdleVoiceHint(name: string, isLoggedIn = true): string {
+  return isLoggedIn
+    ? `按住和${normalizePetDisplayName(name)}说话`
+    : '轻触登录，与萌宠互动'
 }
 
 function buildListeningVoiceHint(name: string): string {
@@ -513,6 +562,10 @@ function buildHeardSoundVoiceHint(name: string): string {
   return `${normalizePetDisplayName(name)}听见了声音`
 }
 
+function isVoiceBusy(status: VoiceStatus): boolean {
+  return status === 'uploading' || status === 'transcribing' || status === 'thinking'
+}
+
 function getVoiceRecognitionProvider(): VoiceRecognitionProvider {
   const provider = bootstrapConfig.voiceRecognition && bootstrapConfig.voiceRecognition.provider
   return provider === 'cloud-asr' ? 'cloud-asr' : 'wechat-si'
@@ -521,7 +574,7 @@ function getVoiceRecognitionProvider(): VoiceRecognitionProvider {
 Component({
   data: {
   pageName: 'home',
-  configReady: false,
+    configReady: false,
   appName: FALLBACK_BOOTSTRAP_CONFIG.appName,
   petName: FALLBACK_BOOTSTRAP_CONFIG.defaultPetName,
   homeHint: FALLBACK_BOOTSTRAP_CONFIG.homeHint,
@@ -539,8 +592,9 @@ Component({
     pickerRooms: buildPickerRooms(FALLBACK_BOOTSTRAP_CONFIG.rooms),
     settings: FALLBACK_BOOTSTRAP_CONFIG.settings.items,
     miniAd: FALLBACK_BOOTSTRAP_CONFIG.settings.miniAd,
+    logoutButton: FALLBACK_BOOTSTRAP_CONFIG.settings.logoutButton,
     voiceStatus: 'idle',
-    voiceHint: buildIdleVoiceHint(FALLBACK_BOOTSTRAP_CONFIG.defaultPetName),
+    voiceHint: buildIdleVoiceHint(FALLBACK_BOOTSTRAP_CONFIG.defaultPetName, false),
     transcribedText: '',
     petReply: '',
     orbPressed: false,
@@ -553,6 +607,7 @@ Component({
     moodText: '开心',
     debugMemories: [] as string[],
     debugPortrait: '',
+    debugPortraitTriggered: false,
     debugPortraitUpdated: false,
     debugPortraitMemoryCount: 0,
     debugMemorySource: '',
@@ -561,12 +616,22 @@ Component({
     debugOpen: false,
     activePetIndex: 0,
     activeRoomIndex: Math.max(0, FALLBACK_BOOTSTRAP_CONFIG.rooms.findIndex((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId)),
+    authReady: false,
+    isLoggedIn: false,
+    loginOpenId: '',
+    loginHint: '未登录，设置与同步需要微信登录',
+    loginLoading: false,
+    userAvatarUrl: '',
+    userNickName: '',
+    nickNameInput: '',
+    profileSaving: false,
   } as PageData,
 
   lifetimes: {
     attached() {
       this.syncSystemLayout()
       this.initRecorder()
+      this.initAuthState()
       this.fetchBootstrapConfig()
       this.initPetVideoCanvas()
     },
@@ -770,9 +835,7 @@ Component({
 
       if (petVideoStartingUrl === url || (petVideoDecoder && petVideoActiveUrl === url)) return
 
-      this.stopAlphaVideo()
       petVideoStartingUrl = url
-      petVideoActiveUrl = url
       petVideoFirstFrameLogged = false
       petVideoFrameShapeWarned = false
       petVideoFramePending = false
@@ -787,11 +850,15 @@ Component({
         const decoder = this.createVideoDecoder()
 
         if (!decoder) {
-          petVideoStartingUrl = ''
+          if (petVideoStartingUrl === url) petVideoStartingUrl = ''
           return
         }
 
+        if (petVideoDecoder) {
+          try { petVideoDecoder.stop(); petVideoDecoder.remove() } catch {}
+        }
         petVideoDecoder = decoder
+        petVideoActiveUrl = url
         decoder.on('start', (...args) => {
           if (petVideoStartTimer) {
             clearTimeout(petVideoStartTimer)
@@ -822,49 +889,86 @@ Component({
 
         if (isPromiseLike(startResult)) {
           startResult.catch((error) => {
-            if (petVideoActiveUrl !== url && petVideoStartingUrl !== url) return
+            if (petVideoDecoder !== decoder && petVideoStartingUrl !== url) return
             this.stopAlphaVideo()
             console.warn('[index] alpha video decoder rejected:', error)
           })
         }
       } catch (error) {
-        this.stopAlphaVideo()
+        if (petVideoActiveUrl === url) {
+          this.stopAlphaVideo()
+        }
         if (petVideoStartTimer) {
           clearTimeout(petVideoStartTimer)
           petVideoStartTimer = 0
         }
-        petVideoStartingUrl = ''
-        petVideoActiveUrl = ''
+        if (petVideoStartingUrl === url) petVideoStartingUrl = ''
         console.warn('[index] alpha video start failed:', error)
       }
     },
 
     async playNextInPlaylist(item: { videoUrl: string; audioUrl: string }) {
       if (!item.videoUrl) return
+      const requestPetId = activePetId
 
       try {
-        if (petVideoNextDecoder && petVideoNextReady) {
+        const usePreparedDecoder = async () => {
+          if (!petVideoNextDecoder || petVideoNextUrl !== item.videoUrl) return false
+
+          if (!petVideoNextReady && petVideoNextReadyPromise) {
+            await Promise.race([
+              petVideoNextReadyPromise,
+              wait(PET_VIDEO_NEXT_READY_WAIT_MS),
+            ])
+          }
+
+          if (!petVideoNextDecoder || petVideoNextUrl !== item.videoUrl || !petVideoNextReady) return false
+
+          const warmFrame = petVideoNextWarmFrame
           if (petVideoDecoder) {
             try { petVideoDecoder.stop(); petVideoDecoder.remove() } catch {}
           }
           petVideoDecoder = petVideoNextDecoder
           petVideoActiveUrl = item.videoUrl
-          petVideoFrameIndex = 0
+          petVideoFrameIndex = PET_VIDEO_TRIM_FRAMES
+          petVideoFramePending = false
+          petVideoFramePendingDecoder = null
           petVideoNextDecoder = null
           petVideoNextReady = false
+          petVideoNextReadyPromise = null
+          petVideoNextReadyResolve = null
+          petVideoNextSceneId = ''
+          petVideoNextUrl = ''
+          petVideoNextWarmFrame = null
+          petVideoNextWarming = false
+          if (warmFrame) {
+            this.drawAlphaVideoFrame(warmFrame)
+          }
           this.renderAlphaVideoFrame()
-        } else {
+          return true
+        }
+
+        if (!(await usePreparedDecoder())) {
           const source = await this.resolveVideoSource(item.videoUrl)
+          const decoder = this.createVideoDecoder()
+          if (!decoder) return
           if (petVideoDecoder) {
             try { petVideoDecoder.stop(); petVideoDecoder.remove() } catch {}
           }
-          const decoder = this.createVideoDecoder()
-          if (!decoder) return
           petVideoDecoder = decoder
           petVideoActiveUrl = item.videoUrl
           petVideoFrameIndex = 0
+          if (petVideoNextDecoder) {
+            try { petVideoNextDecoder.stop(); petVideoNextDecoder.remove() } catch {}
+          }
           petVideoNextDecoder = null
           petVideoNextReady = false
+          petVideoNextReadyPromise = null
+          petVideoNextReadyResolve = null
+          petVideoNextSceneId = ''
+          petVideoNextUrl = ''
+          petVideoNextWarmFrame = null
+          petVideoNextWarming = false
           this.setupDecoderEvents(decoder, item.videoUrl)
           decoder.start({ source, mode: 0 })
         }
@@ -874,6 +978,13 @@ Component({
         this.prepareNextDecoder()
       } catch (error) {
         console.warn('[index] playNextInPlaylist failed:', error)
+        void wait(PET_VIDEO_RETRY_SCENE_DELAY_MS).then(() => {
+          if (this.data.pageName !== 'home') return
+          if (activePetId !== requestPetId) return
+          if (!item.videoUrl) return
+          this.playNextInPlaylist(item)
+        })
+        this.prepareNextDecoder()
       }
     },
 
@@ -908,24 +1019,82 @@ Component({
       const videoUrl = action.videoUrls[Math.floor(Math.random() * action.videoUrls.length)]
       if (!videoUrl) return
 
+      if (petVideoNextDecoder && petVideoNextSceneId === nextScene && petVideoNextUrl === videoUrl) {
+        return
+      }
+
       try {
+        petVideoNextSceneId = nextScene
+        petVideoNextUrl = videoUrl
+        petVideoNextReady = false
+        petVideoNextWarmFrame = null
+        petVideoNextWarming = false
+        petVideoNextReadyPromise = new Promise<void>((resolve) => {
+          petVideoNextReadyResolve = resolve
+        })
         const source = await this.resolveVideoSource(videoUrl)
         if (petVideoNextDecoder) {
           try { petVideoNextDecoder.stop(); petVideoNextDecoder.remove() } catch {}
         }
-        petVideoNextReady = false
         const decoder = this.createVideoDecoder()
         if (!decoder) return
 
         decoder.on('start', () => {
-          petVideoNextReady = true
+          this.warmNextDecoder(decoder, videoUrl)
         })
         this.setupDecoderEvents(decoder, videoUrl)
-        decoder.start({ source, mode: 0 })
         petVideoNextDecoder = decoder
+        decoder.start({ source, mode: 0 })
       } catch (error) {
+        console.warn('[index] prepare next decoder failed:', { nextScene, videoUrl, error })
         petVideoNextDecoder = null
         petVideoNextReady = false
+        petVideoNextReadyPromise = null
+        petVideoNextReadyResolve = null
+        petVideoNextSceneId = ''
+        petVideoNextUrl = ''
+        petVideoNextWarmFrame = null
+        petVideoNextWarming = false
+      }
+    },
+
+    async warmNextDecoder(decoder: PetVideoDecoder, videoUrl: string) {
+      if (petVideoNextWarming) return
+      petVideoNextWarming = true
+
+      try {
+        let frame: PetVideoFrameData | null = null
+        let emptyReads = 0
+        for (let index = 0; index <= PET_VIDEO_TRIM_FRAMES; index++) {
+          const frameResult = decoder.getFrameData()
+          frame = isPromiseLike(frameResult) ? await frameResult : frameResult
+          if (petVideoNextDecoder !== decoder || petVideoNextUrl !== videoUrl) return
+          if (!frame || !frame.data || !frame.width || !frame.height) {
+            emptyReads++
+            if (emptyReads >= PET_VIDEO_WARM_MAX_EMPTY_READS) {
+              return
+            }
+            await wait(16)
+            index--
+          } else {
+            emptyReads = 0
+          }
+        }
+
+        petVideoNextWarmFrame = frame
+        petVideoNextReady = true
+        if (petVideoNextReadyResolve) {
+          petVideoNextReadyResolve()
+          petVideoNextReadyResolve = null
+        }
+      } catch (error) {
+        if (petVideoNextDecoder === decoder && petVideoNextUrl === videoUrl) {
+          console.warn('[index] warm next decoder failed:', error)
+        }
+      } finally {
+        if (petVideoNextDecoder === decoder && petVideoNextUrl === videoUrl) {
+          petVideoNextWarming = false
+        }
       }
     },
 
@@ -949,6 +1118,7 @@ Component({
       petVideoFirstFrameLogged = false
       petVideoFrameShapeWarned = false
       petVideoFramePending = false
+      petVideoFramePendingDecoder = null
       petVideoAlphaSamplesLogged = false
       this.stopPetAudio()
 
@@ -979,6 +1149,12 @@ Component({
         } catch {}
         petVideoNextDecoder = null
         petVideoNextReady = false
+        petVideoNextReadyPromise = null
+        petVideoNextReadyResolve = null
+        petVideoNextSceneId = ''
+        petVideoNextUrl = ''
+        petVideoNextWarmFrame = null
+        petVideoNextWarming = false
       }
     },
 
@@ -1019,12 +1195,14 @@ Component({
       this.startPetRenderer()
     },
 
-    enterHomePage(updateData: Record<string, unknown> = {}) {
+    enterHomePage(updateData: Record<string, unknown> = {}, shouldResume = true) {
       this.setData({
         ...updateData,
         pageName: 'home',
       }, () => {
-        this.resumePetRenderer()
+        if (shouldResume) {
+          this.resumePetRenderer()
+        }
       })
     },
 
@@ -1049,24 +1227,52 @@ Component({
 
       if (cached) return cached
 
+      const pending = petVideoSourcePendingCache[url]
+      if (pending) return pending
+
       if (!wx.cloud) {
         throw new Error('wx.cloud is not ready')
       }
 
-      const result = await wx.cloud.downloadFile({
-        fileID: url,
+      const pendingPromise = (async () => {
+        for (let attempt = 0; attempt <= PET_VIDEO_DOWNLOAD_RETRY_DELAYS_MS.length; attempt++) {
+          try {
+            const result = await wx.cloud.downloadFile({
+              fileID: url,
+            })
+
+            if (!result.tempFilePath) {
+              throw new Error('empty video tempFilePath')
+            }
+
+            petVideoSourceCache[url] = result.tempFilePath
+            console.info('[index] alpha video cloud source resolved:', {
+              url,
+              source: result.tempFilePath,
+              attempts: attempt + 1,
+            })
+            return result.tempFilePath
+          } catch (error) {
+            const retryDelay = PET_VIDEO_DOWNLOAD_RETRY_DELAYS_MS[attempt]
+            if (retryDelay === undefined) throw error
+
+            console.warn('[index] alpha video cloud download retry:', {
+              url,
+              attempt: attempt + 1,
+              retryDelay,
+              error,
+            })
+            await wait(retryDelay)
+          }
+        }
+
+        throw new Error('video download failed')
+      })().finally(() => {
+        delete petVideoSourcePendingCache[url]
       })
 
-      if (!result.tempFilePath) {
-        throw new Error('empty video tempFilePath')
-      }
-
-      petVideoSourceCache[url] = result.tempFilePath
-      console.info('[index] alpha video cloud source resolved:', {
-        url,
-        source: result.tempFilePath,
-      })
-      return result.tempFilePath
+      petVideoSourcePendingCache[url] = pendingPromise
+      return pendingPromise
     },
 
     renderAlphaVideoFrame() {
@@ -1078,19 +1284,26 @@ Component({
       }
 
       if (!petVideoFramePending) {
-        const frameResult = petVideoDecoder.getFrameData()
+        const decoder = petVideoDecoder
+        const frameResult = decoder.getFrameData()
 
         if (isPromiseLike(frameResult)) {
           petVideoFramePending = true
+          petVideoFramePendingDecoder = decoder
           frameResult
             .then((frame) => {
               petVideoFramePending = false
+              if (petVideoDecoder !== decoder || petVideoFramePendingDecoder !== decoder) return
+              petVideoFramePendingDecoder = null
               if (frame && frame.data && frame.width && frame.height) {
                 this.handleVideoFrame(frame)
               }
             })
             .catch((error) => {
               petVideoFramePending = false
+              if (petVideoFramePendingDecoder === decoder) {
+                petVideoFramePendingDecoder = null
+              }
               console.warn('[index] alpha video getFrameData failed:', error)
             })
         } else if (frameResult && frameResult.data && frameResult.width && frameResult.height) {
@@ -1120,17 +1333,6 @@ Component({
       const pixelLength = frame.width * frame.height * RGBA_BYTES_PER_PIXEL
       const rawFrame = new Uint8Array(frame.data)
       const split = this.detectAlphaVideoSplit(frame.width, frame.height)
-
-      if (!petVideoFirstFrameLogged) {
-        petVideoFirstFrameLogged = true
-        console.info('[index] alpha video first frame:', {
-          width: frame.width,
-          height: frame.height,
-          byteLength: rawFrame.byteLength,
-          expectedRgbaByteLength: pixelLength,
-          split,
-        })
-      }
 
       if (rawFrame.byteLength < pixelLength) {
         if (!petVideoFrameShapeWarned) {
@@ -1167,6 +1369,17 @@ Component({
 
       gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+
+      if (!petVideoFirstFrameLogged) {
+        petVideoFirstFrameLogged = true
+        console.info('[index] alpha video first frame:', {
+          width: frame.width,
+          height: frame.height,
+          byteLength: rawFrame.byteLength,
+          expectedRgbaByteLength: pixelLength,
+          split,
+        })
+      }
     },
 
     detectAlphaVideoSplit(width: number, height: number): AlphaVideoSplit {
@@ -1317,11 +1530,27 @@ Component({
     },
 
     async initSoul(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
-      const prefs = await this.loadUserPrefs()
+      const prefs = authSession && authSession.openId ? await this.loadUserPrefs() : { activePetId: '' }
       activePetId = prefs.activePetId || config.defaultPetId
-      await this.fetchPetManifest(activePetId)
-      await this.loadPetState(activePetId)
-      this.startPetRenderer()
+      if (!authSession || !authSession.openId) {
+        petState = createDefaultState()
+      }
+
+      void this.fetchPetManifest(activePetId).then(() => {
+        if (this.data.pageName === 'home' && activePetId) {
+          this.startPetRenderer()
+        }
+      })
+
+      if (authSession && authSession.openId) {
+        void this.loadPetState(activePetId).then(() => {
+          if (this.data.pageName === 'home' && activePetId) {
+            this.startPetRenderer()
+          }
+        })
+      } else {
+        this.syncPanelUI()
+      }
       this.startSoulTick()
     },
 
@@ -1371,6 +1600,7 @@ Component({
     },
 
     async loadUserPrefs(): Promise<{ activePetId: string }> {
+      if (!authSession || !authSession.openId) return { activePetId: '' }
       if (!wx.cloud) return { activePetId: '' }
 
       try {
@@ -1387,6 +1617,7 @@ Component({
     },
 
     saveUserPrefs() {
+      if (!authSession || !authSession.openId) return
       if (!wx.cloud || !activePetId) return
       wx.cloud.callFunction({
         name: 'petState',
@@ -1395,6 +1626,11 @@ Component({
     },
 
     async loadPetState(petId: string) {
+      if (!authSession || !authSession.openId) {
+        petState = createDefaultState()
+        this.syncPanelUI()
+        return
+      }
       if (!wx.cloud) return
 
       try {
@@ -1415,6 +1651,7 @@ Component({
     },
 
     savePetState() {
+      if (!authSession || !authSession.openId) return
       if (stateSavePending || !activePetId) return
       stateSavePending = true
       if (stateSaveTimer) clearTimeout(stateSaveTimer)
@@ -1515,8 +1752,228 @@ Component({
       }
     },
 
+    initAuthState() {
+      const cached = getCachedAuthSession()
+      authSession = cached
+      this.applyAuthSession(cached, false)
+
+      validateCachedAuthSession()
+        .then((session) => {
+          authSession = session
+          this.applyAuthSession(session, true)
+          if (session && this.data.configReady) {
+            this.reloadLoggedInUserState()
+          }
+        })
+        .catch((error) => {
+          console.warn('[index] auth session check failed:', error)
+          authSession = null
+          this.applyAuthSession(null, true)
+        })
+    },
+
+    applyAuthSession(session: AuthSession | null, ready = true) {
+      const nickName = session && session.nickName ? session.nickName : ''
+      const avatarUrl = getCachedAvatarUrl()
+
+      this.setData({
+        authReady: ready,
+        isLoggedIn: Boolean(session && session.openId),
+        loginOpenId: session && session.openId ? maskOpenId(session.openId) : '',
+        loginHint: session && session.openId
+          ? `已登录 ${maskOpenId(session.openId)}`
+          : '未登录，设置与同步需要微信登录',
+        userAvatarUrl: avatarUrl,
+        userNickName: nickName,
+        nickNameInput: nickName,
+      })
+
+      if (this.data.pageName === 'home' && this.data.voiceStatus === 'idle') {
+        this.setData({
+          voiceHint: buildIdleVoiceHint(this.data.petName, Boolean(session && session.openId)),
+        })
+      }
+    },
+
+    async ensureLogin(scene = 'settings'): Promise<boolean> {
+      if (authSession && authSession.openId) return true
+      return this.performLogin(scene)
+    },
+
+    async performLogin(scene = 'settings'): Promise<boolean> {
+      if (this.data.loginLoading) return false
+
+      this.setData({ loginLoading: true, loginHint: '正在登录...' })
+      try {
+        const session = await loginWithWechat(scene)
+        authSession = session
+        this.applyAuthSession(session, true)
+        await this.reloadLoggedInUserState()
+        wx.showToast({ title: '登录成功', icon: 'success' })
+        return true
+      } catch (error) {
+        const message = this.formatLoginError(error)
+        console.warn('[index] login failed:', error)
+        clearAuthSession()
+        authSession = null
+        this.applyAuthSession(null, true)
+        wx.showToast({ title: message, icon: 'none' })
+        return false
+      } finally {
+        this.setData({ loginLoading: false })
+      }
+    },
+
+    async reloadLoggedInUserState() {
+      if (!authSession || !authSession.openId) return
+      const prefs = await this.loadUserPrefs()
+      const petId = prefs.activePetId || activePetId || bootstrapConfig.defaultPetId
+      const nextPet = this.data.pets.find((pet) => pet.id === petId) || this.data.pets[0]
+      if (!nextPet) return
+
+      chatSessionId += 1
+      chatHistory = []
+      activePetId = nextPet.id
+      activePetVideoUrl = nextPet.videoUrl || bootstrapConfig.homeMedia.petVideoUrl
+      activePetAudioUrl = nextPet.audioUrl || ''
+      this.stopAlphaVideo()
+
+      this.setData({
+        petName: normalizePetDisplayName(nextPet.name),
+        voiceHint: buildIdleVoiceHint(nextPet.name, Boolean(authSession && authSession.openId)),
+        activePetIndex: Math.max(0, this.data.pets.findIndex((pet) => pet.id === nextPet.id)),
+        settingsThumb: nextPet.thumbUrl || '',
+      })
+
+      await this.fetchPetManifest(nextPet.id)
+      await this.loadPetState(nextPet.id)
+      this.startPetRenderer()
+    },
+
+    formatLoginError(error: unknown): string {
+      const message = error && typeof error === 'object' && 'message' in error
+        ? String((error as { message?: unknown }).message || '')
+        : String(error || '')
+
+      if (message.includes('auth deny') || message.includes('cancel')) {
+        return '你取消了登录'
+      }
+
+      if (message.includes('云开发')) {
+        return '云开发还没准备好'
+      }
+
+      return '登录失败，请稍后再试'
+    },
+
+    async handleChooseAvatar(event: WechatMiniprogram.CustomEvent<{ avatarUrl?: string }>) {
+      const avatarUrl = event.detail && typeof event.detail.avatarUrl === 'string'
+        ? event.detail.avatarUrl.trim()
+        : ''
+      if (!avatarUrl) return
+
+      saveCachedAvatarUrl(avatarUrl)
+      this.setData({ userAvatarUrl: avatarUrl })
+    },
+
+    handleNicknameInput(event: WechatMiniprogram.Input) {
+      const nickName = event.detail && typeof event.detail.value === 'string'
+        ? event.detail.value
+        : ''
+      this.setData({ nickNameInput: nickName })
+    },
+
+    async handleSaveWechatProfile() {
+      const loggedIn = await this.ensureLogin('profile')
+      if (!loggedIn) return
+
+      if (this.data.profileSaving) return
+
+      this.setData({ profileSaving: true })
+      try {
+        const session = await updateWechatProfile({
+          nickName: this.data.nickNameInput,
+        })
+        authSession = session
+        this.applyAuthSession(session, true)
+        await this.reloadLoggedInUserState()
+        wx.showToast({ title: '资料已保存', icon: 'success' })
+      } catch (error) {
+        console.warn('[index] profile update failed:', error)
+        wx.showToast({ title: '资料保存失败', icon: 'none' })
+      } finally {
+        this.setData({ profileSaving: false })
+      }
+    },
+
     openSettings() {
       this.leaveHomePage('settings')
+    },
+
+    async handleLoginTap() {
+      if (this.data.loginLoading) return
+      const loggedIn = await this.performLogin('settings')
+      if (loggedIn) {
+        await this.reloadLoggedInUserState()
+      }
+    },
+
+    async handleLogoutTap() {
+      if (this.data.loginLoading) return
+
+      const confirm = await new Promise<boolean>((resolve) => {
+        wx.showModal({
+          title: '退出登录',
+          content: '退出后会清除本地登录态和头像缓存，当前宠物状态将回到匿名模式。云端昵称和数据不会删除。',
+          confirmText: '退出',
+          cancelText: '取消',
+          success: (res) => resolve(Boolean(res.confirm)),
+          fail: () => resolve(false),
+        })
+      })
+
+      if (!confirm) return
+
+      clearAuthSession()
+      clearCachedAvatarUrl()
+      authSession = null
+      this.setData({
+        userAvatarUrl: '',
+        userNickName: '',
+        nickNameInput: '',
+        loginHint: '未登录，设置与同步需要微信登录',
+      })
+      await this.reloadAnonymousState()
+      wx.showToast({ title: '已退出登录', icon: 'success' })
+    },
+
+    async reloadAnonymousState() {
+      activePetId = bootstrapConfig.defaultPetId
+      const nextPet = this.data.pets.find((pet) => pet.id === activePetId) || this.data.pets[0]
+      if (!nextPet) return
+
+      chatSessionId += 1
+      chatHistory = []
+      petState = createDefaultState()
+      petSceneQueue = []
+      petManifestActions = []
+      activePetVideoUrl = nextPet.videoUrl || bootstrapConfig.homeMedia.petVideoUrl
+      activePetAudioUrl = nextPet.audioUrl || ''
+      this.stopAlphaVideo()
+
+      this.setData({
+        petName: normalizePetDisplayName(nextPet.name),
+        voiceHint: buildIdleVoiceHint(nextPet.name, false),
+        activePetIndex: Math.max(0, this.data.pets.findIndex((pet) => pet.id === nextPet.id)),
+        settingsThumb: nextPet.thumbUrl || '',
+        transcribedText: '',
+        petReply: '',
+        voiceStatus: 'idle',
+      })
+
+      this.syncPanelUI()
+      await this.fetchPetManifest(nextPet.id)
+      this.startPetRenderer()
     },
 
     toggleDrawer() {
@@ -1549,10 +2006,13 @@ Component({
         manifestActions: petManifestActions.map((a) => `${a.id}(${a.videoUrls ? a.videoUrls.length : 0})`),
         debugMemories: this.data.debugMemories,
         debugPortrait: this.data.debugPortrait,
+        debugPortraitTriggered: this.data.debugPortraitTriggered,
         debugPortraitUpdated: this.data.debugPortraitUpdated,
         debugPortraitMemoryCount: this.data.debugPortraitMemoryCount,
         debugMemorySource: this.data.debugMemorySource,
         debugMemoryParseMode: this.data.debugMemoryParseMode,
+        isLoggedIn: this.data.isLoggedIn,
+        loginOpenId: this.data.loginOpenId,
       }, null, 2))
     },
 
@@ -1564,9 +2024,11 @@ Component({
       this.setData({ pageName: 'settings' })
     },
 
-    handleSettingTap(event: WechatMiniprogram.TouchEvent) {
+    async handleSettingTap(event: WechatMiniprogram.TouchEvent) {
       const target = event.currentTarget.dataset.target as PageName | undefined
       if (!target) return
+      const loggedIn = await this.ensureLogin(`setting-${target}`)
+      if (!loggedIn) return
       this.setData({ pageName: target })
     },
 
@@ -1579,6 +2041,8 @@ Component({
     },
 
     async selectPet() {
+      const loggedIn = await this.ensureLogin('select-pet')
+      if (!loggedIn) return
       const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
       if (!selected) return
 
@@ -1592,27 +2056,44 @@ Component({
       petManifestActions = []
       petSceneQueue = []
       petState = createDefaultState()
+      this.stopAlphaVideo()
 
       this.saveUserPrefs()
-      await this.fetchPetManifest(selected.id)
-      await this.loadPetState(selected.id)
-
       this.enterHomePage({
         petName: normalizePetDisplayName(selected.name),
-        voiceHint: buildIdleVoiceHint(selected.name),
+        voiceHint: buildIdleVoiceHint(selected.name, Boolean(authSession && authSession.openId)),
         transcribedText: '',
         petReply: '',
         voiceStatus: 'idle',
         settingsThumb: (selected && selected.thumbUrl) || '',
+      }, false)
+
+      this.startPetRenderer()
+
+      void this.fetchPetManifest(selected.id).then(() => {
+        if (this.data.pageName === 'home' && activePetId === selected.id) {
+          this.startPetRenderer()
+        }
+      })
+
+      void this.loadPetState(selected.id).then(() => {
+        if (this.data.pageName === 'home' && activePetId === selected.id) {
+          this.startPetRenderer()
+        }
       })
     },
 
     savePetStateNow() {
+      if (!authSession || !authSession.openId) return
       if (!wx.cloud || !activePetId) return
       wx.cloud.callFunction({ name: 'petState', data: { action: 'save', petId: activePetId, state: petState } }).catch(() => undefined)
     },
 
     selectRoom() {
+      if (!authSession || !authSession.openId) {
+        this.ensureLogin('select-room')
+        return
+      }
       const selected = this.data.pickerRooms[this.data.activeRoomIndex] || this.data.pickerRooms[0]
 
       if (!selected) return
@@ -1627,7 +2108,22 @@ Component({
 
     async handleListenTouchStart() {
       if (this.data.pageName !== 'home') return
-      if (this.data.voiceStatus === 'uploading' || this.data.voiceStatus === 'transcribing' || this.data.voiceStatus === 'thinking') return
+      if (isVoiceBusy(this.data.voiceStatus)) return
+      if (!authSession || !authSession.openId) {
+        if (voiceLoginPending) return
+        voiceLoginPending = true
+        this.setData({ orbPressed: true, voiceHint: '正在登录...' })
+        try {
+          const loggedIn = await this.ensureLogin('voice')
+          this.setData({
+            orbPressed: false,
+            voiceHint: buildIdleVoiceHint(this.data.petName, loggedIn),
+          })
+        } finally {
+          voiceLoginPending = false
+        }
+        return
+      }
 
       this.setData({ orbPressed: true })
       const result = soulHandleEvent('user_speak', petState, petSceneQueue)
@@ -1676,6 +2172,7 @@ Component({
 
     handleListenTouchEnd() {
       this.setData({ orbPressed: false })
+      if (voiceLoginPending) return
 
       if (wechatSiActive) {
         recordingStopping = true
@@ -1744,7 +2241,10 @@ Component({
           transcribedText: text,
           petReply: '',
         })
-        await this.requestPetReply(text)
+        await this.requestPetReply(text, {
+          petId: activePetId,
+          petName: this.data.petName,
+        })
         return
       }
 
@@ -1772,7 +2272,10 @@ Component({
             transcribedText: text,
             petReply: '',
           })
-          await this.requestPetReply(text)
+          await this.requestPetReply(text, {
+            petId: activePetId,
+            petName: this.data.petName,
+          })
           return
         }
 
@@ -1840,7 +2343,10 @@ Component({
       })
 
       if (text) {
-        await this.requestPetReply(text)
+        await this.requestPetReply(text, {
+          petId: activePetId,
+          petName: this.data.petName,
+        })
       }
     },
 
@@ -1956,7 +2462,10 @@ Component({
             transcribedText: text,
             petReply: '',
           })
-          await this.requestPetReply(text)
+          await this.requestPetReply(text, {
+            petId: activePetId,
+            petName: this.data.petName,
+          })
         }
         const onError = (res: { retcode?: number; msg?: string }) => {
           console.warn('[index] wechat si onError:', res)
@@ -2131,11 +2640,19 @@ Component({
       }
     },
 
-    async requestPetReply(text: string) {
+    async requestPetReply(text: string, requestPet?: { petId?: string; petName?: string }) {
+      const restoreVoiceAfterStaleReply = () => {
+        if (this.data.voiceStatus !== 'thinking') return
+        this.setData({
+          voiceStatus: 'idle',
+          voiceHint: buildIdleVoiceHint(this.data.petName, Boolean(authSession && authSession.openId)),
+        })
+      }
+
       try {
         const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
-        const requestPetId = selected.id
-        const requestPetName = normalizePetDisplayName(selected.name)
+        const requestPetId = requestPet && requestPet.petId ? requestPet.petId : (activePetId || selected.id)
+        const requestPetName = normalizePetDisplayName(requestPet && requestPet.petName ? requestPet.petName : this.data.petName || selected.name)
         const requestSessionId = chatSessionId
         const history = chatHistory.slice(-MAX_CHAT_HISTORY)
 
@@ -2167,6 +2684,7 @@ Component({
             requestSessionId,
             currentSessionId: chatSessionId,
           })
+          restoreVoiceAfterStaleReply()
           return
         }
 
@@ -2175,7 +2693,7 @@ Component({
 
           this.setData({
             voiceStatus: 'success',
-            voiceHint: buildHeardVoiceHint(selected.name),
+            voiceHint: buildHeardVoiceHint(requestPetName),
             petReply: message || '我听到啦，先陪你待一会儿。',
           })
           return
@@ -2189,6 +2707,7 @@ Component({
         if (meta) {
           if (Array.isArray(meta.memories)) this.setData({ debugMemories: meta.memories as string[] })
           if (typeof meta.portrait === 'string') this.setData({ debugPortrait: meta.portrait as string })
+          if (typeof meta.portraitTriggered === 'boolean') this.setData({ debugPortraitTriggered: meta.portraitTriggered })
           if (typeof meta.portraitUpdated === 'boolean') this.setData({ debugPortraitUpdated: meta.portraitUpdated })
           if (typeof meta.portraitMemoryCount === 'number') this.setData({ debugPortraitMemoryCount: meta.portraitMemoryCount })
           if (typeof meta.memorySource === 'string') this.setData({ debugMemorySource: meta.memorySource })
@@ -2215,15 +2734,16 @@ Component({
         this.syncPanelUI()
       } catch (error) {
         const selected = this.data.pets[this.data.activePetIndex] || this.data.pets[0]
-        const requestPetId = selected.id
+        const requestPetId = requestPet && requestPet.petId ? requestPet.petId : (activePetId || selected.id)
         const requestSessionId = chatSessionId
         if (requestSessionId !== chatSessionId || activePetId !== requestPetId) {
+          restoreVoiceAfterStaleReply()
           return
         }
         console.warn('[index] ai response failed:', error)
         this.setData({
           voiceStatus: 'success',
-          voiceHint: buildHeardVoiceHint(normalizePetDisplayName(selected.name)),
+          voiceHint: buildHeardVoiceHint(normalizePetDisplayName(requestPet && requestPet.petName ? requestPet.petName : this.data.petName || selected.name)),
           petReply: '我听到啦，先陪你待一会儿。',
         })
         petState = soulApplyEvent(petState, 'ai_replied')

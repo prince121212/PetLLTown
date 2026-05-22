@@ -7,6 +7,7 @@ cloud.init({
 const db = cloud.database()
 const STATES_COLLECTION = 'pet_states'
 const PREFS_COLLECTION = 'user_prefs'
+const USERS_COLLECTION = 'users'
 
 async function ensureCollection(name) {
   try {
@@ -39,6 +40,38 @@ async function setDoc(collection, docId, data) {
       await db.collection(collection).doc(docId).set({ data })
     } else {
       throw error
+    }
+  }
+}
+
+async function touchUser(openId, extra = {}) {
+  if (!openId) return
+
+  const timestamp = new Date().toISOString()
+  try {
+    await db.collection(USERS_COLLECTION).doc(openId).update({
+      data: {
+        _openId: openId,
+        openId,
+        lastActiveAt: timestamp,
+        updatedAt: timestamp,
+        ...extra,
+      },
+    })
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message.includes('DATABASE_COLLECTION_NOT_EXIST') || message.includes('not exist')) {
+      await setDoc(USERS_COLLECTION, openId, {
+        _openId: openId,
+        openId,
+        loginProvider: 'wechat-miniprogram',
+        firstLoginAt: timestamp,
+        lastLoginAt: timestamp,
+        lastActiveAt: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        ...extra,
+      }).catch(() => undefined)
     }
   }
 }
@@ -78,6 +111,7 @@ exports.main = async (event = {}) => {
       _petId: petId,
       _savedAt: new Date().toISOString(),
     })
+    await touchUser(openId, { lastPetId: petId })
     return { ok: true }
   }
 
@@ -97,6 +131,9 @@ exports.main = async (event = {}) => {
       ...prefs,
       _openId: openId,
       updatedAt: new Date().toISOString(),
+    })
+    await touchUser(openId, {
+      activePetId: typeof prefs.activePetId === 'string' ? prefs.activePetId : undefined,
     })
     return { ok: true }
   }

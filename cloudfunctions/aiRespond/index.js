@@ -322,6 +322,7 @@ async function writeAiLog(log) {
 
 const MEMORIES_COLLECTION = 'user_memories'
 const PROFILES_COLLECTION = 'user_profiles'
+const USERS_COLLECTION = 'users'
 
 async function ensureCollection(name) {
   try {
@@ -330,6 +331,43 @@ async function ensureCollection(name) {
     const message = error && error.message ? String(error.message) : ''
     if (message && !message.includes('already exist')) {
       console.warn('[aiRespond] ensureCollection failed:', name, message)
+    }
+  }
+}
+
+async function touchUser(openId, extra = {}) {
+  if (!openId) return
+
+  const timestamp = now()
+  try {
+    await db.collection(USERS_COLLECTION).doc(openId).update({
+      data: {
+        _openId: openId,
+        openId,
+        lastActiveAt: timestamp,
+        updatedAt: timestamp,
+        ...extra,
+      },
+    })
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : ''
+    if (message.includes('DATABASE_COLLECTION_NOT_EXIST') || message.includes('not exist')) {
+      try {
+        await ensureCollection(USERS_COLLECTION)
+        await db.collection(USERS_COLLECTION).doc(openId).set({
+          data: {
+            _openId: openId,
+            openId,
+            loginProvider: 'wechat-miniprogram',
+            firstLoginAt: timestamp,
+            lastLoginAt: timestamp,
+            lastActiveAt: timestamp,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            ...extra,
+          },
+        })
+      } catch {}
     }
   }
 }
@@ -734,6 +772,10 @@ exports.main = async (event = {}, context = {}) => {
       aiMemoryConfig,
       usage: aiResult.usage,
       elapsedMs: Date.now() - startedAt,
+    })
+    await touchUser(openId, {
+      lastAiAt: now(),
+      lastPetId: petId,
     })
 
     return {

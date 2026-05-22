@@ -1,0 +1,12 @@
+{
+  "name": "auth-login",
+  "version": "1.0.0",
+  "description": "PetLLTown WeChat mini program login",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

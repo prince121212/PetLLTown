@@ -51,6 +51,10 @@ export interface MiniAdConfig {
   copy: string
 }
 
+export interface LogoutButtonConfig {
+  enabled: boolean
+}
+
 export interface HomeMediaConfig {
   backgroundVideoUrl: string
   petVideoUrl: string
@@ -71,6 +75,7 @@ export interface BootstrapConfig {
   settings: {
     items: SettingItem[]
     miniAd: MiniAdConfig
+    logoutButton: LogoutButtonConfig
   }
   rooms: RoomOption[]
   pets: PetOption[]
@@ -150,6 +155,9 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       enabled: true,
       title: '宠物小小镇会员',
       copy: '让小团子一直记得你',
+    },
+    logoutButton: {
+      enabled: true,
     },
   },
   rooms: [
@@ -283,6 +291,14 @@ function mergeMiniAd(value: unknown): MiniAdConfig {
   }
 }
 
+function mergeLogoutButton(value: unknown): LogoutButtonConfig {
+  if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.settings.logoutButton
+
+  return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : FALLBACK_BOOTSTRAP_CONFIG.settings.logoutButton.enabled,
+  }
+}
+
 function mergeAiMemory(value: unknown): AiMemoryConfig {
   if (!isRecord(value)) return FALLBACK_BOOTSTRAP_CONFIG.aiMemory
 
@@ -326,6 +342,7 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     settings: {
       items: items.length ? items : FALLBACK_BOOTSTRAP_CONFIG.settings.items,
       miniAd: mergeMiniAd(settings.miniAd),
+      logoutButton: mergeLogoutButton(settings.logoutButton),
     },
     rooms: rooms.length ? rooms : FALLBACK_BOOTSTRAP_CONFIG.rooms,
     pets: pets.length ? pets : FALLBACK_BOOTSTRAP_CONFIG.pets,

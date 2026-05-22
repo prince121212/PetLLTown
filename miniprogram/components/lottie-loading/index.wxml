@@ -1,0 +1,3 @@
+<view wx:if="{{visible}}" class="lottie-loading">
+  <canvas id="lottieCanvas" type="2d" class="lottie-canvas"></canvas>
+</view>

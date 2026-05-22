@@ -1,11 +1,12 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CheckCircle2,
   CloudUpload,
   ExternalLink,
+  Database,
   GitBranch,
   Home,
   Image,
@@ -27,6 +28,11 @@ import {
   addActionVideo,
   createPetFromWebm,
   createRoomFromMedia,
+  getDataCatalog,
+  getDataCollection,
+  getDataPetDetail,
+  getDataUsers,
+  getDataUserDetail,
   discardDraft,
   getAdminState,
   getPetManifest,
@@ -54,6 +60,11 @@ import {
   AdminAuditLog,
   AdminState,
   BootstrapConfig,
+  DataCollectionCatalogItem,
+  DataCollectionResult,
+  DataPetDetailResult,
+  DataUserIndexResult,
+  DataUserDetailResult,
   MediaCreateResult,
   MediaInspectResult,
   PetManifestSummary,
@@ -64,10 +75,11 @@ import {
   VersionRecord,
 } from './types'
 
-type RouteKey = 'dashboard' | 'pets' | 'rooms' | 'home' | 'media' | 'publish'
+type RouteKey = 'dashboard' | 'data' | 'pets' | 'rooms' | 'home' | 'media' | 'publish'
 
 const navItems: Array<{ key: RouteKey; path: string; label: string; icon: typeof Home }> = [
   { key: 'dashboard', path: '/dashboard', label: '概览', icon: Home },
+  { key: 'data', path: '/data', label: '云数据', icon: Database },
   { key: 'pets', path: '/pets', label: '宠物', icon: PawPrint },
   { key: 'rooms', path: '/rooms', label: '背景', icon: Image },
   { key: 'home', path: '/home', label: '首页配置', icon: ListChecks },
@@ -131,7 +143,8 @@ export function App() {
     [workingConfig],
   )
 
-  const title = navItems.find((item) => location.pathname.startsWith(item.path))?.label || '概览'
+  const title = navItems.find((item) => location.pathname.startsWith(item.path))?.label
+    || (location.pathname.startsWith('/data/users') ? '用户表' : '概览')
 
   function updateConfig(next: BootstrapConfig) {
     saveMutation.mutate(next)
@@ -220,6 +233,11 @@ export function App() {
                 />
               }
             />
+            <Route path="/data" element={<CloudDataIndex />} />
+            <Route path="/data/users" element={<CloudDataUsersPage />} />
+            <Route path="/data/:collection" element={<CloudDataCollectionPage />} />
+            <Route path="/data/user/:openId" element={<CloudDataUserPage />} />
+            <Route path="/data/pet/:petId" element={<CloudDataPetPage />} />
             <Route
               path="/pets"
               element={
@@ -399,6 +417,458 @@ function Metric({ title, value, tone }: { title: string; value: string; tone?: '
       <strong>{value}</strong>
     </div>
   )
+}
+
+function CloudDataIndex() {
+  const query = useQuery({
+    queryKey: ['data-catalog'],
+    queryFn: getDataCatalog,
+  })
+  const catalog = query.data || []
+  const groups = useMemo(() => {
+    const result: Record<string, DataCollectionCatalogItem[]> = { config: [], content: [], user: [], log: [] }
+    for (const item of catalog) {
+      result[item.category].push(item)
+    }
+    return result
+  }, [catalog])
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>云数据</h2>
+        <div className="row-actions">
+          <Link className="secondary-button" to="/data/users">用户表</Link>
+        </div>
+      </div>
+      <span className="muted">只读浏览现有云集合与业务数据</span>
+      {query.isLoading && <span className="muted">正在加载目录…</span>}
+      {query.error && <div className="error-state">{query.error instanceof Error ? query.error.message : '加载失败'}</div>}
+      {!query.isLoading && !query.error && (
+        <div className="data-category-grid">
+          {(['config', 'content', 'user', 'log'] as const).map((category) => (
+            <div className="data-category-panel" key={category}>
+              <h3>{categoryLabel(category)}</h3>
+              <div className="audit-list">
+                {groups[category].map((item) => (
+                  <Link className="data-collection-card" to={`/data/${encodeURIComponent(item.collection)}`} key={item.collection}>
+                    <strong>{item.label}</strong>
+                    <span>{item.description}</span>
+                    <small>{item.collection} · 按 {item.sortField || '默认'} 排序</small>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CloudDataUsersPage() {
+  const [limit, setLimit] = useState(25)
+  const [skip, setSkip] = useState(0)
+  const [q, setQ] = useState('')
+  const [petId, setPetId] = useState('')
+  const [status, setStatus] = useState('')
+  const [sort, setSort] = useState('lastSeenAt')
+  const query = useQuery({
+    queryKey: ['data-users', limit, skip, q, petId, status, sort],
+    queryFn: () => getDataUsers({ limit, skip, q: q.trim(), petId: petId.trim(), status, sort }),
+  })
+  const result = query.data
+  const page = Math.floor(skip / limit) + 1
+  const pageCount = result ? Math.max(1, Math.ceil(result.total / result.limit)) : 1
+  const currentEnd = result ? Math.min(result.total, result.skip + result.items.length) : 0
+
+  return (
+    <section className="panel user-admin-panel">
+      <div className="panel-head">
+        <div>
+          <h2>用户管理</h2>
+          <p className="panel-subtitle">按真实用户维度查看登录、活跃、记忆和画像状态。</p>
+        </div>
+        <button className="secondary-button" onClick={() => query.refetch()} type="button">刷新</button>
+      </div>
+      {result && (
+        <div className="user-metrics-grid">
+          <button className={`user-metric-card ${status === '' ? 'active' : ''}`} type="button" onClick={() => { setStatus(''); setSkip(0) }}>
+            <span>总用户</span>
+            <strong>{result.stats.totalUsers}</strong>
+          </button>
+          <button className={`user-metric-card active-today ${status === 'active_today' ? 'active' : ''}`} type="button" onClick={() => { setStatus('active_today'); setSkip(0) }}>
+            <span>今日活跃</span>
+            <strong>{result.stats.activeToday}</strong>
+          </button>
+          <button className={`user-metric-card active-week ${status === 'active_7d' ? 'active' : ''}`} type="button" onClick={() => { setStatus('active_7d'); setSkip(0) }}>
+            <span>7日活跃</span>
+            <strong>{result.stats.active7d}</strong>
+          </button>
+          <button className={`user-metric-card warn ${status === 'needs_profile' ? 'active' : ''}`} type="button" onClick={() => { setStatus('needs_profile'); setSkip(0) }}>
+            <span>待完善资料</span>
+            <strong>{result.stats.usersMissingWechatProfile}</strong>
+          </button>
+          <button className={`user-metric-card ${status === 'needs_memory' ? 'active' : ''}`} type="button" onClick={() => { setStatus('needs_memory'); setSkip(0) }}>
+            <span>有记忆 / 有画像</span>
+            <strong>{result.stats.usersWithMemory} / {result.stats.usersWithProfile}</strong>
+          </button>
+          <button className={`user-metric-card muted-card ${status === 'inactive' ? 'active' : ''}`} type="button" onClick={() => { setStatus('inactive'); setSkip(0) }}>
+            <span>沉默用户</span>
+            <strong>{result.stats.inactiveUsers}</strong>
+          </button>
+        </div>
+      )}
+      <div className="user-toolbar">
+        <div className="button-row">
+          <input className="inline-filter wide" placeholder="搜索昵称 / openId" value={q} onChange={(e) => { setQ(e.target.value); setSkip(0) }} />
+          <input className="inline-filter" placeholder="petId 过滤" value={petId} onChange={(e) => { setPetId(e.target.value); setSkip(0) }} />
+          <select className="inline-filter" value={status} onChange={(e) => { setStatus(e.target.value); setSkip(0) }}>
+            <option value="">全部状态</option>
+            <option value="active_today">今日活跃</option>
+            <option value="active_7d">7日活跃</option>
+            <option value="needs_profile">待完善资料</option>
+            <option value="needs_memory">缺少记忆</option>
+            <option value="inactive">沉默用户</option>
+            <option value="normal">普通用户</option>
+          </select>
+          <select className="inline-filter" value={sort} onChange={(e) => { setSort(e.target.value); setSkip(0) }}>
+            <option value="lastSeenAt">最近活跃优先</option>
+            <option value="loginCount">登录次数最多</option>
+            <option value="memoryCount">记忆最多</option>
+            <option value="aiLogCount">AI 调用最多</option>
+            <option value="profileCompleteness">资料完整度最高</option>
+          </select>
+          <select className="inline-filter compact" value={limit} onChange={(e) => { setLimit(Number(e.target.value) || 25); setSkip(0) }}>
+            <option value={25}>25条/页</option>
+            <option value={50}>50条/页</option>
+            <option value={100}>100条/页</option>
+          </select>
+        </div>
+        {result && (
+          <span className="user-page-info">
+            第 {page} / {pageCount} 页，显示 {result.total ? result.skip + 1 : 0}-{currentEnd}，共 {result.total} 位用户
+          </span>
+        )}
+      </div>
+      {query.isLoading && <span className="muted">加载中…</span>}
+      {query.error && <div className="error-state">{query.error instanceof Error ? query.error.message : '加载失败'}</div>}
+      {result && (
+        <>
+          <div className="user-table-wrap">
+            <table className="user-table">
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>状态</th>
+                  <th>当前宠物</th>
+                  <th>资料</th>
+                  <th>记忆 / 画像</th>
+                  <th>语音 / AI</th>
+                  <th>最近活跃</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.items.map((row) => (
+                  <tr key={row.openId}>
+                    <td>
+                      <div className="user-record-title">
+                        <span className="user-record-avatar placeholder">主</span>
+                        <div>
+                          <strong>{row.nickName || row.openId || '微信用户'}</strong>
+                          <span>{maskText(row.openId)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span className={`user-status-badge ${row.status}`}>{row.statusLabel}</span></td>
+                    <td>
+                      <strong>{row.activePetId || '—'}</strong>
+                      <small>{row.petIds.length ? `${row.petIds.length} 只宠物` : '未选择'}</small>
+                    </td>
+                    <td>
+                      <div className="profile-progress">
+                        <span style={{ width: `${row.profileCompleteness}%` }} />
+                      </div>
+                      <small>{row.profileCompleteness}% 完整</small>
+                    </td>
+                    <td>
+                      <strong>{row.memoryCount} / {row.profileCount}</strong>
+                      <small>{row.sampleMemory || row.samplePortrait || '暂无沉淀'}</small>
+                    </td>
+                    <td>
+                      <strong>{row.voiceLogCount} / {row.aiLogCount}</strong>
+                      <small>登录 {row.loginCount} 次</small>
+                    </td>
+                    <td>
+                      <strong>{formatTime(row.lastActiveAt || row.lastSeenAt) || '—'}</strong>
+                      <small>注册 {formatTime(row.firstLoginAt)}</small>
+                    </td>
+                    <td>
+                      <div className="row-actions nowrap">
+                        <Link className="secondary-button" to={`/data/user/${encodeURIComponent(row.openId)}`}>详情</Link>
+                        {row.activePetId && <Link className="secondary-button" to={`/data/pet/${encodeURIComponent(row.activePetId)}`}>宠物</Link>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!result.items.length && <div className="empty-state">没有找到符合条件的用户</div>}
+          </div>
+          <div className="user-pagination">
+            <button className="secondary-button" type="button" disabled={skip <= 0} onClick={() => setSkip(Math.max(0, skip - limit))}>上一页</button>
+            <span>第 {page} / {pageCount} 页</span>
+            <button className="secondary-button" type="button" disabled={skip + limit >= result.total} onClick={() => setSkip(skip + limit)}>下一页</button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+function CloudDataCollectionPage() {
+  const { collection = '' } = useParams<{ collection: string }>()
+  const [limit, setLimit] = useState(20)
+  const [skip, setSkip] = useState(0)
+  const [openId, setOpenId] = useState('')
+  const [petId, setPetId] = useState('')
+  const [searchText, setSearchText] = useState('')
+  const query = useQuery({
+    queryKey: ['data-collection', collection, limit, skip, openId, petId, searchText],
+    queryFn: () => getDataCollection(collection, { limit, skip, openId: openId.trim(), petId: petId.trim() }),
+    enabled: Boolean(collection),
+  })
+  const result = query.data
+  const filteredItems = useMemo(() => {
+    if (!result) return []
+    const keyword = searchText.trim().toLowerCase()
+    if (!keyword) return result.items
+    return result.items.filter((item) => JSON.stringify(item).toLowerCase().includes(keyword))
+  }, [result, searchText])
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>{collection}</h2>
+        <div className="button-row">
+          <input className="inline-filter" placeholder="openId" value={openId} onChange={(e) => setOpenId(e.target.value)} />
+          <input className="inline-filter" placeholder="petId" value={petId} onChange={(e) => setPetId(e.target.value)} />
+          <input className="inline-filter" placeholder="字段搜索" value={searchText} onChange={(e) => setSearchText(e.target.value)} />
+          <input className="inline-filter short" type="number" value={limit} onChange={(e) => setLimit(Number(e.target.value) || 20)} />
+          <input className="inline-filter short" type="number" value={skip} onChange={(e) => setSkip(Number(e.target.value) || 0)} />
+          <button className="secondary-button" onClick={() => query.refetch()} type="button">刷新</button>
+        </div>
+      </div>
+      {query.isLoading && <span className="muted">加载中…</span>}
+      {query.error && <div className="error-state">{query.error instanceof Error ? query.error.message : '加载失败'}</div>}
+      {result && (
+        <>
+          <div className="summary-list">
+            <span>集合：{result.collection}</span>
+            <span>总数：{result.total}</span>
+            <span>当前条数：{filteredItems.length}</span>
+            <span>排序字段：{result.meta?.sortField || '-'}</span>
+          </div>
+          <DataRecordList
+            collection={result.collection}
+            items={filteredItems}
+            meta={result.meta}
+            onQuickOpen={(next) => {
+              if (next.type === 'user') {
+                window.location.href = `/data/user/${encodeURIComponent(next.value)}`
+              } else if (next.type === 'pet') {
+                window.location.href = `/data/pet/${encodeURIComponent(next.value)}`
+              }
+            }}
+          />
+        </>
+      )}
+    </section>
+  )
+}
+
+function CloudDataUserPage() {
+  const { openId = '' } = useParams<{ openId: string }>()
+  const query = useQuery({
+    queryKey: ['data-user', openId],
+    queryFn: () => getDataUserDetail(openId),
+    enabled: Boolean(openId),
+  })
+  const result = query.data
+
+  return (
+    <section className="grid">
+      <div className="panel">
+        <div className="panel-head">
+          <h2>用户数据</h2>
+          <span className="muted">{openId}</span>
+        </div>
+        {query.isLoading && <span className="muted">加载中…</span>}
+      {query.error && <div className="error-state">{query.error instanceof Error ? query.error.message : '加载失败'}</div>}
+      {result && (
+        <div className="data-user-grid">
+          <DataBlock title="登录账号" data={result.user} />
+          <DataBlock title="用户偏好" data={result.userPrefs} />
+          <DataBlock title="用户画像" data={result.userProfiles} />
+          <DataBlock title="宠物状态" data={result.petStates.items} />
+            <DataBlock title="短期记忆" data={result.userMemories.items} />
+            <DataBlock title="语音日志" data={result.voiceLogs.items} />
+            <DataBlock title="AI 日志" data={result.aiLogs.items} />
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CloudDataPetPage() {
+  const { petId = '' } = useParams<{ petId: string }>()
+  const query = useQuery({
+    queryKey: ['data-pet', petId],
+    queryFn: () => getDataPetDetail(petId),
+    enabled: Boolean(petId),
+  })
+  const result = query.data
+
+  return (
+    <section className="grid">
+      <div className="panel">
+        <div className="panel-head">
+          <h2>宠物数据</h2>
+          <span className="muted">{petId}</span>
+        </div>
+        {query.isLoading && <span className="muted">加载中…</span>}
+        {query.error && <div className="error-state">{query.error instanceof Error ? query.error.message : '加载失败'}</div>}
+        {result && (
+          <div className="data-user-grid">
+            <DataBlock title="宠物资料" data={result.pet} />
+            <DataBlock title="宠物状态" data={result.petStates.items} />
+            <DataBlock title="AI 日志" data={result.aiLogs.items} />
+            <DataBlock title="Manifest" data={result.manifest} />
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function DataBlock({ title, data }: { title: string; data: unknown }) {
+  return (
+    <div className="data-block">
+      <h3>{title}</h3>
+      <pre className="json-view small">{formatJson(data)}</pre>
+    </div>
+  )
+}
+
+function categoryLabel(category: 'config' | 'content' | 'user' | 'log') {
+  if (category === 'config') return '配置'
+  if (category === 'content') return '内容'
+  if (category === 'user') return '用户'
+  return '日志'
+}
+
+function DataRecordList({
+  collection,
+  items,
+  meta,
+  onQuickOpen,
+}: {
+  collection: string
+  items: Array<Record<string, unknown>>
+  meta: DataCollectionResult['meta']
+  onQuickOpen: (target: { type: 'user' | 'pet'; value: string }) => void
+}) {
+  if (!items.length) {
+    return <div className="empty-state compact">没有匹配的数据</div>
+  }
+
+  return (
+    <div className="data-record-list">
+      {items.map((item, index) => (
+        <DataRecordCard
+          key={`${collection}-${index}`}
+          item={item}
+          meta={meta}
+          onQuickOpen={onQuickOpen}
+        />
+      ))}
+    </div>
+  )
+}
+
+function DataRecordCard({
+  item,
+  meta,
+  onQuickOpen,
+}: {
+  item: Record<string, unknown>
+  meta: DataCollectionResult['meta']
+  onQuickOpen: (target: { type: 'user' | 'pet'; value: string }) => void
+}) {
+  const openId = meta && typeof item[guessOpenIdField(meta)] === 'string' ? String(item[guessOpenIdField(meta)]) : ''
+  const petId = meta && typeof item[guessPetIdField(meta)] === 'string' ? String(item[guessPetIdField(meta)]) : ''
+  const title = pickPrimaryLabel(item)
+
+  return (
+    <div className="data-record-card">
+      <div className="data-record-card-head">
+        <strong>{title}</strong>
+        <div className="row-actions">
+          {openId && <button type="button" onClick={() => onQuickOpen({ type: 'user', value: openId })}>看用户</button>}
+          {petId && <button type="button" onClick={() => onQuickOpen({ type: 'pet', value: petId })}>看宠物</button>}
+        </div>
+      </div>
+      <div className="summary-list">
+        {Object.entries(item)
+          .slice(0, 6)
+          .map(([key, value]) => (
+            <span key={key}>
+              <strong>{key}：</strong>
+              <span>{formatSummaryValue(value)}</span>
+            </span>
+          ))}
+      </div>
+      <details>
+        <summary>查看完整 JSON</summary>
+        <pre className="json-view small">{formatJson(item)}</pre>
+      </details>
+    </div>
+  )
+}
+
+function guessOpenIdField(meta: DataCollectionResult['meta']) {
+  if (!meta) return '_openId'
+  if (meta.category === 'log') return '_openid'
+  return '_openId'
+}
+
+function guessPetIdField(meta: DataCollectionResult['meta']) {
+  if (!meta) return 'petId'
+  return meta.category === 'user' ? '_petId' : 'petId'
+}
+
+function pickPrimaryLabel(item: Record<string, unknown>) {
+  const candidates = ['summary', 'name', 'label', 'action', 'content', 'title', 'reply', 'target', 'version']
+  for (const key of candidates) {
+    const value = item[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return item._id && typeof item._id === 'string' ? item._id : '记录'
+}
+
+function formatSummaryValue(value: unknown) {
+  if (value === null) return 'null'
+  if (value === undefined) return '—'
+  if (typeof value === 'string') return value.length > 48 ? `${value.slice(0, 45)}…` : value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    const text = JSON.stringify(value)
+    return text.length > 48 ? `${text.slice(0, 45)}…` : text
+  } catch {
+    return String(value)
+  }
 }
 
 function PetsView({
@@ -1071,6 +1541,22 @@ function HomeView({
           type="checkbox"
         />
         展示会员小卡片
+      </label>
+      <label className="check-field">
+        <input
+          checked={draft.settings.logoutButton.enabled}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              settings: {
+                ...draft.settings,
+                logoutButton: { ...draft.settings.logoutButton, enabled: event.target.checked },
+              },
+            })
+          }
+          type="checkbox"
+        />
+        展示退出登录按钮
       </label>
       <fieldset className="visibility-fieldset">
         <legend>设置项可见性</legend>
@@ -1803,6 +2289,21 @@ function formatTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function maskText(value: string): string {
+  const text = String(value || '').trim()
+  if (text.length <= 14) return text || '—'
+  return `${text.slice(0, 7)}...${text.slice(-5)}`
+}
+
+function formatJson(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function CloudLink({ fileID, label }: { fileID: string; label: string }) {

@@ -79,6 +79,9 @@
       "enabled": true,
       "title": "宠物小小镇会员",
       "copy": "让小团子一直记得你"
+    },
+    "logoutButton": {
+      "enabled": true
     }
   },
   "rooms": [

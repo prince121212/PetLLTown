@@ -24,6 +24,9 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
       title: '',
       copy: '',
     },
+    logoutButton: {
+      enabled: true,
+    },
   }
   const fallbackAiMemory: AiMemoryConfig = {
     shortTermMemoryMaxCount: 8,
@@ -56,6 +59,10 @@ export function normalizeBootstrapConfig(value: BootstrapConfig): BootstrapConfi
       miniAd: {
         ...fallbackSettings.miniAd,
         ...(value.settings?.miniAd || {}),
+      },
+      logoutButton: {
+        ...fallbackSettings.logoutButton,
+        ...(value.settings?.logoutButton || {}),
       },
       items: Array.isArray(value.settings?.items) ? value.settings.items : [],
     },

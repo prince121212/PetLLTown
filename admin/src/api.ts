@@ -1,4 +1,17 @@
-import { ActionVideoResult, AdminState, BootstrapConfig, MediaCreateResult, MediaInspectResult, PetManifestSummary, RoomMediaCreateResult } from './types'
+import {
+  ActionVideoResult,
+  AdminState,
+  BootstrapConfig,
+  DataCollectionCatalogItem,
+  DataCollectionResult,
+  DataPetDetailResult,
+  DataUserIndexResult,
+  DataUserDetailResult,
+  MediaCreateResult,
+  MediaInspectResult,
+  PetManifestSummary,
+  RoomMediaCreateResult,
+} from './types'
 
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
@@ -95,4 +108,36 @@ export function deleteActionVideo(petId: string, actionId: string, videoUrl: str
     method: 'DELETE',
     body: JSON.stringify({ videoUrl }),
   })
+}
+
+export function getDataCatalog(): Promise<DataCollectionCatalogItem[]> {
+  return requestJson<DataCollectionCatalogItem[]>('/api/data/catalog')
+}
+
+export function getDataCollection(collection: string, params: { limit?: number; skip?: number; openId?: string; petId?: string } = {}): Promise<DataCollectionResult> {
+  const search = new URLSearchParams()
+  if (typeof params.limit === 'number') search.set('limit', String(params.limit))
+  if (typeof params.skip === 'number') search.set('skip', String(params.skip))
+  if (params.openId) search.set('openId', params.openId)
+  if (params.petId) search.set('petId', params.petId)
+  return requestJson<DataCollectionResult>(`/api/data/collection/${encodeURIComponent(collection)}?${search.toString()}`)
+}
+
+export function getDataUserDetail(openId: string): Promise<DataUserDetailResult> {
+  return requestJson<DataUserDetailResult>(`/api/data/user/${encodeURIComponent(openId)}`)
+}
+
+export function getDataPetDetail(petId: string): Promise<DataPetDetailResult> {
+  return requestJson<DataPetDetailResult>(`/api/data/pet/${encodeURIComponent(petId)}`)
+}
+
+export function getDataUsers(params: { limit?: number; skip?: number; q?: string; petId?: string; status?: string; sort?: string } = {}): Promise<DataUserIndexResult> {
+  const search = new URLSearchParams()
+  if (typeof params.limit === 'number') search.set('limit', String(params.limit))
+  if (typeof params.skip === 'number') search.set('skip', String(params.skip))
+  if (params.q) search.set('q', params.q)
+  if (params.petId) search.set('petId', params.petId)
+  if (params.status) search.set('status', params.status)
+  if (params.sort) search.set('sort', params.sort)
+  return requestJson<DataUserIndexResult>(`/api/data/users?${search.toString()}`)
 }

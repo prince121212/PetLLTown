@@ -126,8 +126,29 @@
 
       <view class="settings-main">
         <view class="pet-card">
-          <image class="pet-thumb" src="{{settingsThumb}}" mode="aspectFit" />
-          <text class="pet-card-name">{{petName}}</text>
+          <button
+            class="profile-avatar-btn"
+            open-type="chooseAvatar"
+            bindchooseavatar="handleChooseAvatar"
+            aria-label="选择微信头像"
+          >
+            <image class="profile-avatar" src="{{userAvatarUrl || settingsThumb}}" mode="aspectFit" />
+          </button>
+          <view class="pet-card-copy">
+            <view class="profile-name-row">
+              <input
+                class="profile-name-input"
+                type="nickname"
+                value="{{nickNameInput}}"
+                placeholder="填写微信昵称"
+                bindinput="handleNicknameInput"
+              />
+              <button class="profile-save-btn" bindtap="handleSaveWechatProfile" loading="{{profileSaving}}" disabled="{{profileSaving}}">
+                {{profileSaving ? '保存中' : '保存'}}
+              </button>
+            </view>
+            <text class="pet-card-login">当前宠物 {{petName}}</text>
+          </view>
         </view>
 
         <view class="setting-list">
@@ -155,6 +176,15 @@
           <text class="mini-ad-title">{{miniAd.title}}</text>
           <text class="mini-ad-copy">{{miniAd.copy}}</text>
         </view>
+
+        <button
+          wx:if="{{isLoggedIn && logoutButton.enabled}}"
+          class="logout-btn"
+          bindtap="handleLogoutTap"
+          loading="{{loginLoading}}"
+        >
+          退出登录
+        </button>
       </view>
     </view>
   </view>

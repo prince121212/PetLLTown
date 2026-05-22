@@ -47,6 +47,10 @@ function mergeBootstrapConfig(base, override) {
         ...base.settings.miniAd,
         ...(settings.miniAd || {}),
       },
+      logoutButton: {
+        ...base.settings.logoutButton,
+        ...(settings.logoutButton || {}),
+      },
     },
     rooms: Array.isArray(override.rooms) && override.rooms.length ? override.rooms : base.rooms,
     pets: Array.isArray(override.pets) && override.pets.length ? override.pets : base.pets,

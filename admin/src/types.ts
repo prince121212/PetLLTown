@@ -67,6 +67,9 @@ export interface BootstrapConfig {
       title: string
       copy: string
     }
+    logoutButton: {
+      enabled: boolean
+    }
   }
   rooms: RoomOption[]
   pets: PetOption[]
@@ -185,4 +188,97 @@ export interface PetManifestSummary {
   petId: string
   name: string
   actions: PetActionSummary[]
+}
+
+export interface DataCollectionCatalogItem {
+  collection: string
+  label: string
+  description: string
+  category: 'config' | 'content' | 'user' | 'log'
+  sortField: string
+  singleDoc: boolean
+  openIdField: string
+  petIdField: string
+}
+
+export interface DataCollectionResult {
+  collection: string
+  meta: {
+    label: string
+    description: string
+    category: 'config' | 'content' | 'user' | 'log'
+    sortField: string
+    singleDoc: boolean
+  } | null
+  total: number
+  limit: number
+  skip: number
+  items: Array<Record<string, unknown>>
+}
+
+export interface DataUserDetailResult {
+  openId: string
+  user: Record<string, unknown> | null
+  petStates: DataCollectionResult
+  userPrefs: Record<string, unknown> | null
+  userMemories: DataCollectionResult
+  userProfiles: Record<string, unknown> | null
+  voiceLogs: DataCollectionResult
+  aiLogs: DataCollectionResult
+}
+
+export interface DataPetDetailResult {
+  petId: string
+  pet: Record<string, unknown> | null
+  petStates: DataCollectionResult
+  aiLogs: DataCollectionResult
+  manifest: PetManifestSummary | null
+}
+
+export interface DataUserIndexRow {
+  openId: string
+  nickName: string
+  status: 'active_today' | 'active_7d' | 'needs_profile' | 'needs_memory' | 'inactive' | 'normal'
+  statusLabel: string
+  profileCompleteness: number
+  petIds: string[]
+  sources: string[]
+  lastSeenAt: string
+  lastActiveAt: string
+  lastLoginAt: string
+  firstLoginAt: string
+  lastMemoryAt: string
+  lastProfileAt: string
+  lastVoiceAt: string
+  lastAiAt: string
+  memoryCount: number
+  profileCount: number
+  petStateCount: number
+  voiceLogCount: number
+  aiLogCount: number
+  loginCount: number
+  hasProfile: boolean
+  activePetId: string
+  sampleMemory: string
+  samplePortrait: string
+}
+
+export interface DataUserIndexResult {
+  total: number
+  limit: number
+  skip: number
+  q: string
+  petId: string
+  status: string
+  sort: string
+  stats: {
+    totalUsers: number
+    activeToday: number
+    active7d: number
+    usersWithProfile: number
+    usersWithMemory: number
+    usersMissingWechatProfile: number
+    inactiveUsers: number
+  }
+  items: DataUserIndexRow[]
 }

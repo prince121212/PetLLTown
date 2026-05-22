@@ -1,0 +1,15 @@
+.lottie-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.lottie-canvas {
+  width: 384rpx;
+  height: 316rpx;
+  background: transparent;
+}

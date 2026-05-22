@@ -31,7 +31,126 @@ const DRAFT_COLLECTION = 'admin_config_drafts'
 const VERSION_COLLECTION = 'admin_config_versions'
 const AUDIT_COLLECTION = 'admin_audit_logs'
 const CONFIG_DOC_ID = 'bootstrap'
-const REQUIRED_COLLECTIONS = [CONFIG_COLLECTION, DRAFT_COLLECTION, VERSION_COLLECTION, AUDIT_COLLECTION, 'pets']
+const REQUIRED_COLLECTIONS = [CONFIG_COLLECTION, DRAFT_COLLECTION, VERSION_COLLECTION, AUDIT_COLLECTION, 'pets', 'users']
+const USER_INDEX_SOURCES = [
+  'users',
+  'pet_states',
+  'user_prefs',
+  'user_memories',
+  'user_profiles',
+  'voice_logs',
+  'ai_logs',
+]
+const DATA_VIEW_DEFS = [
+  {
+    key: 'app_configs',
+    collection: 'app_configs',
+    label: '线上配置',
+    description: '当前生效的启动配置',
+    category: 'config',
+    sortField: 'updatedAt',
+    singleDoc: true,
+  },
+  {
+    key: 'admin_config_drafts',
+    collection: 'admin_config_drafts',
+    label: '配置草稿',
+    description: '后台未发布的配置草稿',
+    category: 'config',
+    sortField: 'updatedAt',
+    singleDoc: true,
+  },
+  {
+    key: 'admin_config_versions',
+    collection: 'admin_config_versions',
+    label: '配置版本',
+    description: '历史发布记录',
+    category: 'config',
+    sortField: 'publishedAt',
+  },
+  {
+    key: 'admin_audit_logs',
+    collection: 'admin_audit_logs',
+    label: '操作日志',
+    description: '后台操作审计记录',
+    category: 'log',
+    sortField: 'createdAt',
+  },
+  {
+    key: 'pets',
+    collection: 'pets',
+    label: '宠物资料',
+    description: '宠物 manifest 与素材地址',
+    category: 'content',
+    sortField: 'updatedAt',
+  },
+  {
+    key: 'users',
+    collection: 'users',
+    label: '用户账号',
+    description: '小程序登录用户与活跃状态',
+    category: 'user',
+    sortField: 'lastActiveAt',
+    openIdField: '_openId',
+  },
+  {
+    key: 'pet_states',
+    collection: 'pet_states',
+    label: '宠物状态',
+    description: '按用户与宠物保存的状态数据',
+    category: 'user',
+    sortField: '_savedAt',
+    openIdField: '_openId',
+    petIdField: '_petId',
+  },
+  {
+    key: 'user_prefs',
+    collection: 'user_prefs',
+    label: '用户偏好',
+    description: '用户当前偏好设置',
+    category: 'user',
+    sortField: 'updatedAt',
+    openIdField: '_openId',
+  },
+  {
+    key: 'user_memories',
+    collection: 'user_memories',
+    label: '短期记忆',
+    description: 'AI 记住的用户信息',
+    category: 'user',
+    sortField: 'createdAt',
+    openIdField: '_openId',
+  },
+  {
+    key: 'user_profiles',
+    collection: 'user_profiles',
+    label: '用户画像',
+    description: '画像与更新状态',
+    category: 'user',
+    sortField: 'lastUpdatedAt',
+    openIdField: '_openId',
+  },
+  {
+    key: 'voice_logs',
+    collection: 'voice_logs',
+    label: '语音日志',
+    description: '语音识别调用记录',
+    category: 'log',
+    sortField: 'createdAt',
+    openIdField: '_openid',
+  },
+  {
+    key: 'ai_logs',
+    collection: 'ai_logs',
+    label: 'AI 日志',
+    description: 'AI 回复与记忆提取日志',
+    category: 'log',
+    sortField: 'createdAt',
+    openIdField: '_openid',
+    petIdField: 'petId',
+  },
+]
+const DATA_VIEW_MAP = new Map(DATA_VIEW_DEFS.map((item) => [item.collection, item]))
 const app = cloudbase.init({ env: envId, secretId, secretKey, region })
 const manager = CloudBaseManager.init({ envId, secretId, secretKey, region })
 const cos = new COS({ SecretId: secretId, SecretKey: secretKey })
@@ -44,6 +163,169 @@ server.use(express.json({ limit: '10mb' }))
 
 server.get('/api/health', (_request, response) => {
   response.json({ ok: true, data: { envId, serverTime: new Date().toISOString() } })
+})
+
+server.get('/api/data/catalog', async (_request, response) => {
+  await handle(response, async () => DATA_VIEW_DEFS.map((item) => ({
+    collection: item.collection,
+    label: item.label,
+    description: item.description,
+    category: item.category,
+    sortField: item.sortField,
+    singleDoc: Boolean(item.singleDoc),
+    openIdField: item.openIdField || '',
+    petIdField: item.petIdField || '',
+  })))
+})
+
+server.get('/api/data/collection/:collection', async (request, response) => {
+  await handle(response, async () => {
+    const collection = normalizeCollectionName(request.params.collection)
+    const meta = DATA_VIEW_MAP.get(collection)
+
+    if (!meta) {
+      const error = new Error(`不支持的数据集合：${collection}`)
+      error.statusCode = 404
+      throw error
+    }
+
+    const limit = clampInt(request.query.limit, 20, 1, 100)
+    const skip = clampInt(request.query.skip, 0, 0, 10000)
+    const openId = String(request.query.openId || '').trim()
+    const petId = String(request.query.petId || '').trim()
+
+    return queryCollectionDocs({
+      collection,
+      meta,
+      limit,
+      skip,
+      openId,
+      petId,
+    })
+  })
+})
+
+server.get('/api/data/user/:openId', async (request, response) => {
+  await handle(response, async () => {
+    const openId = String(request.params.openId || '').trim()
+
+    if (!openId) {
+      const error = new Error('openId 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    return {
+      openId,
+      user: await getSingleDoc('users', openId),
+      petStates: await queryCollectionDocs({
+        collection: 'pet_states',
+        meta: DATA_VIEW_MAP.get('pet_states'),
+        limit: 50,
+        skip: 0,
+        openId,
+      }),
+      userPrefs: await getSingleDoc('user_prefs', openId),
+      userMemories: await queryCollectionDocs({
+        collection: 'user_memories',
+        meta: DATA_VIEW_MAP.get('user_memories'),
+        limit: 50,
+        skip: 0,
+        openId,
+      }),
+      userProfiles: await getSingleDoc('user_profiles', openId),
+      voiceLogs: await queryCollectionDocs({
+        collection: 'voice_logs',
+        meta: DATA_VIEW_MAP.get('voice_logs'),
+        limit: 30,
+        skip: 0,
+        openId,
+      }),
+      aiLogs: await queryCollectionDocs({
+        collection: 'ai_logs',
+        meta: DATA_VIEW_MAP.get('ai_logs'),
+        limit: 30,
+        skip: 0,
+        openId,
+      }),
+    }
+  })
+})
+
+server.get('/api/data/pet/:petId', async (request, response) => {
+  await handle(response, async () => {
+    const petId = normalizeId(request.params.petId)
+
+    if (!petId) {
+      const error = new Error('petId 不能为空')
+      error.statusCode = 400
+      throw error
+    }
+
+    return {
+      petId,
+      pet: await getSingleDoc('pets', petId),
+      petStates: await queryCollectionDocs({
+        collection: 'pet_states',
+        meta: DATA_VIEW_MAP.get('pet_states'),
+        limit: 50,
+        skip: 0,
+        petId,
+      }),
+      aiLogs: await queryCollectionDocs({
+        collection: 'ai_logs',
+        meta: DATA_VIEW_MAP.get('ai_logs'),
+        limit: 30,
+        skip: 0,
+        petId,
+      }),
+      manifest: await getPetManifestSummary(petId),
+    }
+  })
+})
+
+server.get('/api/data/users', async (request, response) => {
+  await handle(response, async () => {
+    const limit = clampInt(request.query.limit, 20, 1, 100)
+    const skip = clampInt(request.query.skip, 0, 0, 100000)
+    const queryText = String(request.query.q || '').trim().toLowerCase()
+    const petFilter = String(request.query.petId || '').trim().toLowerCase()
+    const statusFilter = normalizeUserStatusFilter(request.query.status)
+    const sort = normalizeUserSort(request.query.sort)
+
+    const rows = sortUserIndexRows(await buildUserIndexRows(), sort)
+    const filtered = rows.filter((row) => {
+      if (
+        queryText
+        && !String(row.openId || '').toLowerCase().includes(queryText)
+        && !String(row.nickName || '').toLowerCase().includes(queryText)
+      ) return false
+      if (petFilter && !String(row.activePetId || '').toLowerCase().includes(petFilter) && !row.petIds.some((petId) => String(petId || '').toLowerCase().includes(petFilter))) return false
+      if (statusFilter && row.status !== statusFilter) return false
+      return true
+    })
+    const items = filtered.slice(skip, skip + limit)
+
+    return {
+      total: filtered.length,
+      limit,
+      skip,
+      q: queryText,
+      petId: petFilter,
+      status: statusFilter,
+      sort,
+      stats: {
+        totalUsers: rows.length,
+        activeToday: rows.filter((row) => row.status === 'active_today').length,
+        active7d: rows.filter((row) => row.status === 'active_today' || row.status === 'active_7d').length,
+        usersWithProfile: rows.filter((row) => row.hasProfile).length,
+        usersWithMemory: rows.filter((row) => row.memoryCount > 0).length,
+        usersMissingWechatProfile: rows.filter((row) => row.status === 'needs_profile').length,
+        inactiveUsers: rows.filter((row) => row.status === 'inactive').length,
+      },
+      items,
+    }
+  })
 })
 
 server.patch('/api/media/pets/:petId/actions/:actionId/videos', async (request, response) => {
@@ -1390,6 +1672,334 @@ async function getDocument(collection, id) {
   return result.data || null
 }
 
+async function getSingleDoc(collection, id) {
+  const doc = await getDocument(collection, id)
+  return doc ? sanitizeDoc(doc) : null
+}
+
+async function queryCollectionDocs({ collection, meta, limit, skip, openId, petId }) {
+  if (meta && meta.singleDoc) {
+    const doc = await getDocument(collection, CONFIG_DOC_ID)
+    return {
+      collection,
+      meta: meta
+        ? {
+            label: meta.label,
+            description: meta.description,
+            category: meta.category,
+            sortField: meta.sortField,
+            singleDoc: Boolean(meta.singleDoc),
+          }
+        : null,
+      total: doc ? 1 : 0,
+      limit: 1,
+      skip: 0,
+      items: doc ? [sanitizeDoc(doc)] : [],
+    }
+  }
+
+  const db = app.database()
+  let query = db.collection(collection)
+
+  if (meta && meta.openIdField && openId) {
+    query = query.where({ [meta.openIdField]: openId })
+  }
+
+  if (meta && meta.petIdField && petId) {
+    query = query.where({ [meta.petIdField]: petId })
+  }
+
+  if (meta && meta.sortField) {
+    query = query.orderBy(meta.sortField, 'desc')
+  }
+
+  const result = await query.skip(skip).limit(limit).get().catch((error) => {
+    if (isMissingCollectionError(error)) return { data: [] }
+    throw error
+  })
+
+  const records = Array.isArray(result.data) ? result.data : []
+  return {
+    collection,
+    meta: meta
+      ? {
+          label: meta.label,
+          description: meta.description,
+          category: meta.category,
+          sortField: meta.sortField,
+          singleDoc: Boolean(meta.singleDoc),
+        }
+      : null,
+    total: records.length,
+    limit,
+    skip,
+    items: records.map((record) => sanitizeDoc(record)),
+  }
+}
+
+async function getPetManifestSummary(petId) {
+  const petDoc = await getDocument('pets', petId)
+
+  if (!petDoc || !petDoc.manifest) {
+    return null
+  }
+
+  const manifest = petDoc.manifest
+  return {
+    petId,
+    name: manifest.name || petDoc.name || petId,
+    actions: Array.isArray(manifest.actions)
+      ? manifest.actions.map((action) => ({
+          id: action.id || '',
+          label: action.label || '',
+          type: action.type || '',
+          next: Array.isArray(action.next) ? action.next : [],
+          fps: action.fps || 0,
+          videoUrls: Array.isArray(action.videoUrls) ? action.videoUrls : [],
+          audioUrl: action.audioUrl || '',
+        }))
+      : [],
+  }
+}
+
+async function buildUserIndexRows() {
+  const sources = await Promise.all(USER_INDEX_SOURCES.map(async (collection) => {
+    const meta = DATA_VIEW_MAP.get(collection)
+    const docs = await queryAllDocs(collection)
+    return { collection, meta, docs }
+  }))
+
+  const map = new Map()
+
+  for (const source of sources) {
+    const meta = source.meta
+    const openIdField = meta && meta.openIdField ? meta.openIdField : '_openId'
+    const petIdField = meta && meta.petIdField ? meta.petIdField : ''
+
+    for (const doc of source.docs) {
+      const openId = String(doc[openIdField] || doc._openid || doc._openId || '').trim()
+      if (!openId) continue
+
+      const current = map.get(openId) || {
+        openId,
+        nickName: '',
+        status: 'normal',
+        statusLabel: '普通用户',
+        profileCompleteness: 0,
+        petIds: [],
+        sources: [],
+        lastSeenAt: '',
+        lastMemoryAt: '',
+        lastProfileAt: '',
+        lastVoiceAt: '',
+        lastAiAt: '',
+        memoryCount: 0,
+        profileCount: 0,
+        petStateCount: 0,
+        voiceLogCount: 0,
+        aiLogCount: 0,
+        loginCount: 0,
+        firstLoginAt: '',
+        lastLoginAt: '',
+        lastActiveAt: '',
+        hasProfile: false,
+        activePetId: '',
+        sampleMemory: '',
+        samplePortrait: '',
+      }
+
+      current.sources.push(source.collection)
+
+      if (petIdField) {
+        const petId = String(doc[petIdField] || '').trim()
+        if (petId && !current.petIds.includes(petId)) current.petIds.push(petId)
+        if (!current.activePetId && petId) current.activePetId = petId
+      }
+
+      if (source.collection === 'users') {
+        current.nickName = current.nickName || String(doc.nickName || doc.nickname || doc.wechatNickName || '')
+        current.loginCount = typeof doc.loginCount === 'number' ? doc.loginCount : current.loginCount
+        current.firstLoginAt = pickLater(current.firstLoginAt, doc.firstLoginAt || doc.createdAt || '')
+        current.lastLoginAt = pickLater(current.lastLoginAt, doc.lastLoginAt || '')
+        current.lastActiveAt = pickLater(current.lastActiveAt, doc.lastActiveAt || '')
+        current.lastSeenAt = pickLater(current.lastSeenAt, doc.lastActiveAt || doc.lastLoginAt || doc.updatedAt || '')
+        if (!current.activePetId && doc.activePetId) current.activePetId = String(doc.activePetId)
+        if (!current.activePetId && doc.lastPetId) current.activePetId = String(doc.lastPetId)
+      }
+
+      if (source.collection === 'pet_states') {
+        current.petStateCount += 1
+        current.lastSeenAt = pickLater(current.lastSeenAt, doc._savedAt || doc.updatedAt || '')
+        if (!current.activePetId && doc._petId) current.activePetId = String(doc._petId)
+      }
+
+      if (source.collection === 'user_prefs') {
+        current.lastSeenAt = pickLater(current.lastSeenAt, doc.updatedAt || '')
+      }
+
+      if (source.collection === 'user_memories') {
+        current.memoryCount += 1
+        current.lastMemoryAt = pickLater(current.lastMemoryAt, doc.createdAt || '')
+        current.sampleMemory = current.sampleMemory || String(doc.content || '')
+      }
+
+      if (source.collection === 'user_profiles') {
+        current.profileCount += 1
+        current.hasProfile = true
+        current.lastProfileAt = pickLater(current.lastProfileAt, doc.lastUpdatedAt || '')
+        current.samplePortrait = current.samplePortrait || String(doc.portrait || '')
+      }
+
+      if (source.collection === 'voice_logs') {
+        current.voiceLogCount += 1
+        current.lastVoiceAt = pickLater(current.lastVoiceAt, doc.createdAt || '')
+      }
+
+      if (source.collection === 'ai_logs') {
+        current.aiLogCount += 1
+        current.lastAiAt = pickLater(current.lastAiAt, doc.createdAt || '')
+      }
+
+      map.set(openId, current)
+    }
+  }
+
+  return Array.from(map.values())
+    .map((row) => ({
+      ...row,
+      sources: Array.from(new Set(row.sources)).sort(),
+      petIds: Array.from(new Set(row.petIds)).sort(),
+      lastSeenAt: row.lastSeenAt || row.lastActiveAt || row.lastLoginAt || row.lastMemoryAt || row.lastProfileAt || row.lastVoiceAt || row.lastAiAt || '',
+    }))
+    .map((row) => ({
+      ...row,
+      ...buildUserDisplayState(row),
+    }))
+    .sort((a, b) => String(b.lastSeenAt || '').localeCompare(String(a.lastSeenAt || '')))
+}
+
+function buildUserDisplayState(row) {
+  const hasWechatProfile = Boolean(row.nickName)
+  const profileCompleteness = Math.min(100, [
+    row.nickName,
+    row.activePetId,
+    row.memoryCount > 0,
+    row.hasProfile,
+  ].filter(Boolean).length * 20)
+
+  if (!row.nickName) {
+    return {
+      status: 'needs_profile',
+      statusLabel: '待完善资料',
+      profileCompleteness,
+    }
+  }
+
+  if (isWithinDays(row.lastSeenAt, 1)) {
+    return {
+      status: 'active_today',
+      statusLabel: '今日活跃',
+      profileCompleteness,
+    }
+  }
+
+  if (isWithinDays(row.lastSeenAt, 7)) {
+    return {
+      status: 'active_7d',
+      statusLabel: '7日活跃',
+      profileCompleteness,
+    }
+  }
+
+  if (!row.memoryCount && !row.hasProfile) {
+    return {
+      status: 'needs_memory',
+      statusLabel: '缺少记忆',
+      profileCompleteness,
+    }
+  }
+
+  if (!isWithinDays(row.lastSeenAt, 30)) {
+    return {
+      status: 'inactive',
+      statusLabel: '沉默用户',
+      profileCompleteness,
+    }
+  }
+
+  return {
+    status: 'normal',
+    statusLabel: '普通用户',
+    profileCompleteness,
+  }
+}
+
+function isWithinDays(value, days) {
+  if (!value) return false
+  const time = new Date(value).getTime()
+  if (!Number.isFinite(time)) return false
+  return Date.now() - time <= days * 24 * 60 * 60 * 1000
+}
+
+function normalizeUserStatusFilter(value) {
+  const text = String(value || '').trim()
+  const allowed = new Set(['active_today', 'active_7d', 'needs_profile', 'needs_memory', 'inactive', 'normal'])
+  return allowed.has(text) ? text : ''
+}
+
+function normalizeUserSort(value) {
+  const text = String(value || '').trim()
+  const allowed = new Set(['lastSeenAt', 'loginCount', 'memoryCount', 'aiLogCount', 'profileCompleteness'])
+  return allowed.has(text) ? text : 'lastSeenAt'
+}
+
+function sortUserIndexRows(rows, sort) {
+  return rows.slice().sort((a, b) => {
+    if (sort === 'lastSeenAt') {
+      return String(b.lastSeenAt || '').localeCompare(String(a.lastSeenAt || ''))
+    }
+    const left = Number(a[sort] || 0)
+    const right = Number(b[sort] || 0)
+    return right - left
+  })
+}
+
+async function queryAllDocs(collection) {
+  const db = app.database()
+  const batchSize = 100
+  const result = []
+  let skip = 0
+
+  while (true) {
+    const page = await db.collection(collection).skip(skip).limit(batchSize).get().catch((error) => {
+      if (isMissingCollectionError(error)) return { data: [] }
+      throw error
+    })
+    const items = Array.isArray(page.data) ? page.data : []
+    if (!items.length) break
+    result.push(...items.map((item) => sanitizeDoc(item)))
+    if (items.length < batchSize) break
+    skip += batchSize
+  }
+
+  return result
+}
+
+function pickLater(a, b) {
+  if (!a) return b || ''
+  if (!b) return a || ''
+  return String(a) > String(b) ? a : b
+}
+
+function sanitizeDoc(value) {
+  if (!value || typeof value !== 'object') return value
+  const clone = JSON.parse(JSON.stringify(value))
+  if (clone.config && typeof clone.config === 'object') {
+    clone.config = sanitizeDoc(clone.config)
+  }
+  return clone
+}
+
 function isMissingCollectionError(error) {
   const message = error && error.message ? error.message : String(error)
   return message.includes('DATABASE_COLLECTION_NOT_EXIST') || message.includes('Db or Table not exist')
@@ -1699,6 +2309,19 @@ function normalizeId(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, '')
+}
+
+function normalizeCollectionName(value) {
+  return String(value || '').trim()
+}
+
+function clampInt(value, fallback, min, max) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const normalized = Math.floor(parsed)
+  if (Number.isInteger(min) && normalized < min) return min
+  if (Number.isInteger(max) && normalized > max) return max
+  return normalized
 }
 
 function detectRoomMediaKind({ extension, mimeType }) {
