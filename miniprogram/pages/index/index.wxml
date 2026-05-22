@@ -46,9 +46,7 @@
       </view>
 
       <view class="stage" style="{{homeStageStyle}}" aria-label="宠物主舞台">
-        <view wx:if="{{!configReady}}" class="pet-loading">
-          <view class="pet-loading-spinner"></view>
-        </view>
+        <lottie-loading visible="{{petLoadingVisible}}"></lottie-loading>
         <canvas id="petVideoCanvas" type="webgl" class="pet-canvas"></canvas>
       </view>
 

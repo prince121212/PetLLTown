@@ -296,28 +296,6 @@ button::after {
   background: transparent;
 }
 
-.home-page .pet-loading {
-  grid-area: 1 / 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 630rpx;
-  height: 880rpx;
-}
-
-.home-page .pet-loading-spinner {
-  width: 64rpx;
-  height: 64rpx;
-  border: 4rpx solid rgba(255, 255, 255, 0.2);
-  border-top-color: rgba(255, 255, 255, 0.8);
-  border-radius: 50%;
-  animation: pet-spin 0.8s linear infinite;
-}
-
-@keyframes pet-spin {
-  to { transform: rotate(360deg); }
-}
-
 .home-page .listen-area {
   position: absolute;
   left: 0;

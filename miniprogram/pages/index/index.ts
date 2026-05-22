@@ -329,6 +329,7 @@ let petVideoNextUrl = ''
 let petVideoNextWarmFrame: PetVideoFrameData | null = null
 let petVideoNextWarming = false
 let petVideoFrameIndex = 0
+let petVideoLoadingVisible = false
 const PET_VIDEO_TRIM_FRAMES = 5
 const PET_VIDEO_NEXT_READY_WAIT_MS = 120
 const PET_VIDEO_WARM_MAX_EMPTY_READS = 30
@@ -625,16 +626,18 @@ Component({
     userNickName: '',
     nickNameInput: '',
     profileSaving: false,
+    petLoadingVisible: true,
   } as PageData,
 
   lifetimes: {
     attached() {
-      this.syncSystemLayout()
-      this.initRecorder()
-      this.initAuthState()
-      this.fetchBootstrapConfig()
-      this.initPetVideoCanvas()
-    },
+        this.syncSystemLayout()
+        this.initRecorder()
+        this.initAuthState()
+        this.fetchBootstrapConfig()
+        this.setPetLoadingVisible(true)
+        this.initPetVideoCanvas()
+      },
     detached() {
       this.stopAlphaVideo()
       this.releasePetVideoCanvas()
@@ -871,6 +874,7 @@ Component({
             source,
             detail: (args[0] as Record<string, unknown> | undefined) || null,
           })
+          this.setData({ petLoadingVisible: false })
           this.renderAlphaVideoFrame()
           this.prepareNextDecoder()
         })
@@ -898,6 +902,7 @@ Component({
         if (petVideoActiveUrl === url) {
           this.stopAlphaVideo()
         }
+        this.setData({ petLoadingVisible: false })
         if (petVideoStartTimer) {
           clearTimeout(petVideoStartTimer)
           petVideoStartTimer = 0
@@ -1370,6 +1375,10 @@ Component({
       gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
+      if (this.data.petLoadingVisible) {
+        this.setData({ petLoadingVisible: false })
+      }
+
       if (!petVideoFirstFrameLogged) {
         petVideoFirstFrameLogged = true
         console.info('[index] alpha video first frame:', {
@@ -1527,6 +1536,13 @@ Component({
       this.setData({ ...buildPageData(config), configReady: true })
       this.resolveHomeMedia(config)
       this.initSoul(config)
+      this.setData({ petLoadingVisible: true })
+    },
+
+    setPetLoadingVisible(visible: boolean) {
+      if (petVideoLoadingVisible === visible) return
+      petVideoLoadingVisible = visible
+      this.setData({ petLoadingVisible: visible })
     },
 
     async initSoul(config: typeof FALLBACK_BOOTSTRAP_CONFIG) {
@@ -1837,6 +1853,7 @@ Component({
       activePetVideoUrl = nextPet.videoUrl || bootstrapConfig.homeMedia.petVideoUrl
       activePetAudioUrl = nextPet.audioUrl || ''
       this.stopAlphaVideo()
+      this.setData({ petLoadingVisible: true })
 
       this.setData({
         petName: normalizePetDisplayName(nextPet.name),
@@ -1960,6 +1977,7 @@ Component({
       activePetVideoUrl = nextPet.videoUrl || bootstrapConfig.homeMedia.petVideoUrl
       activePetAudioUrl = nextPet.audioUrl || ''
       this.stopAlphaVideo()
+      this.setData({ petLoadingVisible: true })
 
       this.setData({
         petName: normalizePetDisplayName(nextPet.name),
@@ -2057,6 +2075,7 @@ Component({
       petSceneQueue = []
       petState = createDefaultState()
       this.stopAlphaVideo()
+      this.setData({ petLoadingVisible: true })
 
       this.saveUserPrefs()
       this.enterHomePage({
