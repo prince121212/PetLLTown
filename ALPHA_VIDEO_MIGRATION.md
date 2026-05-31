@@ -15,7 +15,7 @@ The old PNG frame animation fallback has been removed from the homepage render p
 Current cloud video:
 
 ```text
-cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4
+cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4
 ```
 
 Format:

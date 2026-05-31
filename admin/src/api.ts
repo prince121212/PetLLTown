@@ -7,6 +7,8 @@ import {
   DataPetDetailResult,
   DataUserIndexResult,
   DataUserDetailResult,
+  EnvironmentState,
+  ListenOrbUploadResult,
   MediaCreateResult,
   MediaInspectResult,
   PetManifestSummary,
@@ -49,6 +51,17 @@ export function getAdminState(): Promise<AdminState> {
   return requestJson<AdminState>('/api/state')
 }
 
+export function listEnvironments(): Promise<EnvironmentState> {
+  return requestJson<EnvironmentState>('/api/environments')
+}
+
+export function switchEnvironment(key: string): Promise<EnvironmentState> {
+  return requestJson<EnvironmentState>('/api/environment', {
+    method: 'POST',
+    body: JSON.stringify({ key }),
+  })
+}
+
 export function saveDraft(config: BootstrapConfig): Promise<AdminState> {
   return requestJson<AdminState>('/api/draft', {
     method: 'PUT',
@@ -86,6 +99,10 @@ export function createPetFromWebm(formData: FormData): Promise<MediaCreateResult
 
 export function createRoomFromMedia(formData: FormData): Promise<RoomMediaCreateResult> {
   return requestForm<RoomMediaCreateResult>('/api/media/rooms/create-from-media', formData)
+}
+
+export function uploadListenOrbVideo(formData: FormData): Promise<ListenOrbUploadResult> {
+  return requestForm<ListenOrbUploadResult>('/api/media/home/listen-orb', formData)
 }
 
 export function addActionVideo(formData: FormData): Promise<ActionVideoResult> {

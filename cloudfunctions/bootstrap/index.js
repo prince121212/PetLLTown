@@ -54,6 +54,7 @@ function mergeBootstrapConfig(base, override) {
     },
     rooms: Array.isArray(override.rooms) && override.rooms.length ? override.rooms : base.rooms,
     pets: Array.isArray(override.pets) && override.pets.length ? override.pets : base.pets,
+    debugWhitelist: Array.isArray(override.debugWhitelist) ? override.debugWhitelist : (base.debugWhitelist || []),
     membership: {
       ...base.membership,
       ...(override.membership || {}),
@@ -90,10 +91,17 @@ exports.main = async (event = {}) => {
   const databaseConfig = await readDatabaseConfig()
   const config = mergeBootstrapConfig(bundledConfig, databaseConfig)
 
+  const openId = wxContext.OPENID || ''
+  const whitelist = Array.isArray(config.debugWhitelist) ? config.debugWhitelist : []
+  const debugEnabled = Boolean(openId) && whitelist.includes(openId)
+
+  // 不把白名单名单下发给小程序，只返回当前用户是否有调试权限。
+  const { debugWhitelist, ...publicConfig } = config
+
   return {
     ok: true,
     data: {
-      ...config,
+      ...publicConfig,
       serverTime: new Date().toISOString(),
     },
     meta: {
@@ -101,6 +109,7 @@ exports.main = async (event = {}) => {
       env: wxContext.ENV || '',
       appId: wxContext.APPID || '',
       openIdReady: Boolean(wxContext.OPENID),
+      debugEnabled,
       clientVersion: typeof event.clientVersion === 'string' ? event.clientVersion : '',
     },
   }

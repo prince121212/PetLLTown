@@ -37,9 +37,12 @@ import {
   getAdminState,
   getPetManifest,
   inspectPetWebm,
+  listEnvironments,
   publishConfig,
   rollbackToVersion,
   saveDraft,
+  switchEnvironment,
+  uploadListenOrbVideo,
 } from './api'
 import {
   cloneConfig,
@@ -65,6 +68,7 @@ import {
   DataPetDetailResult,
   DataUserIndexResult,
   DataUserDetailResult,
+  EnvironmentState,
   MediaCreateResult,
   MediaInspectResult,
   PetManifestSummary,
@@ -128,6 +132,22 @@ export function App() {
     onSuccess: applyState,
   })
 
+  const environmentsQuery = useQuery<EnvironmentState>({
+    queryKey: ['admin-environments'],
+    queryFn: listEnvironments,
+  })
+  const switchEnvMutation = useMutation({
+    mutationFn: switchEnvironment,
+    onSuccess: (next) => {
+      queryClient.setQueryData(['admin-environments'], next)
+      // 数据源已切换，清空所有缓存并重新拉取。
+      queryClient.invalidateQueries()
+    },
+  })
+
+  const environments = environmentsQuery.data?.environments || []
+  const activeEnv = environments.find((item) => item.active)
+
   const state = stateQuery.data
   const published = useMemo(
     () => (state?.published ? normalizeBootstrapConfig(state.published) : undefined),
@@ -181,7 +201,7 @@ export function App() {
       </aside>
 
       <main className="main">
-        <header className="topbar">
+        <header className={`topbar ${activeEnv?.danger ? 'topbar-danger' : ''}`}>
           <div>
             <h1>{title}</h1>
             <p>
@@ -191,6 +211,33 @@ export function App() {
             </p>
           </div>
           <div className="topbar-actions">
+            {environments.length > 0 && (
+              <div className={`env-switcher ${activeEnv?.danger ? 'env-switcher-danger' : ''}`} title="切换数据源环境">
+                <span className="env-switcher-dot" />
+                <select
+                  className="env-switcher-select"
+                  value={activeEnv?.key || ''}
+                  disabled={switchEnvMutation.isPending}
+                  onChange={(event) => {
+                    const nextKey = event.target.value
+                    if (!nextKey || nextKey === activeEnv?.key) return
+                    const target = environments.find((item) => item.key === nextKey)
+                    if (target?.danger) {
+                      const ok = window.confirm(`即将切换到「${target.label}」(正式环境)。\n\n之后的发布、删除等写操作会直接影响正式数据，确认切换？`)
+                      if (!ok) return
+                    }
+                    switchEnvMutation.mutate(nextKey)
+                  }}
+                >
+                  {environments.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}{item.danger ? '（正式）' : ''}
+                    </option>
+                  ))}
+                </select>
+                {switchEnvMutation.isPending && <Loader2 className="spin" size={14} />}
+              </div>
+            )}
             <DraftBadge state={state} saving={saving} />
             <button className="icon-button" onClick={() => stateQuery.refetch()} title="刷新配置" type="button">
               <RefreshCw size={18} />
@@ -1402,6 +1449,22 @@ function HomeView({
     setDraft(cloneConfig(config))
   }, [config])
 
+  const orbUploadMutation = useMutation({ mutationFn: uploadListenOrbVideo })
+
+  async function handleOrbUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const formData = new FormData()
+    formData.set('source', file)
+    const output = await orbUploadMutation.mutateAsync(formData)
+    setDraft((prev) => ({
+      ...prev,
+      homeMedia: { ...prev.homeMedia, listenOrbVideoUrl: output.mediaUrl },
+    }))
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault()
     onChange(draft)
@@ -1461,6 +1524,56 @@ function HomeView({
           setDraft({ ...draft, homeMedia: { ...draft.homeMedia, listenOrbVideoUrl: value } })
         }
       />
+      <label className="field">
+        <span>上传光球视频（上传后自动填入上方地址，需点保存才生效）</span>
+        <input
+          accept="video/mp4,video/webm,video/quicktime"
+          disabled={orbUploadMutation.isPending}
+          onChange={handleOrbUpload}
+          type="file"
+        />
+      </label>
+      {orbUploadMutation.isPending && (
+        <div className="result-box">
+          <Loader2 className="spin" size={18} />
+          <span>正在上传光球视频…</span>
+        </div>
+      )}
+      {orbUploadMutation.data && !orbUploadMutation.isPending && (
+        <div className="result-box ok">
+          <CheckCircle2 size={18} />
+          <div>
+            <strong>光球视频已上传</strong>
+            <span>{orbUploadMutation.data.mediaUrl}</span>
+            {orbUploadMutation.data.inspect.warnings.map((warning) => (
+              <span key={warning}>⚠️ {warning}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {orbUploadMutation.error && (
+        <div className="error-state">
+          {orbUploadMutation.error instanceof Error ? orbUploadMutation.error.message : '光球视频上传失败'}
+        </div>
+      )}
+      <label className="field">
+        <span>调试白名单 openId（每行一个，仅名单内用户在小程序看到调试面板）</span>
+        <textarea
+          className="whitelist-textarea"
+          rows={4}
+          placeholder="每行填一个 openId，例如：oC6JI3QWT21wf4V4_SAHbnzZ2Ygw"
+          value={(draft.debugWhitelist || []).join('\n')}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              debugWhitelist: event.target.value
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0),
+            })
+          }
+        />
+      </label>
       <NumberField
         label="短期记忆上限"
         value={draft.aiMemory.shortTermMemoryMaxCount}

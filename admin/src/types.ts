@@ -1,5 +1,18 @@
 export type PageName = 'home' | 'settings' | 'petPicker' | 'roomPicker'
 
+export interface EnvironmentItem {
+  key: string
+  label: string
+  envId: string
+  danger: boolean
+  active: boolean
+}
+
+export interface EnvironmentState {
+  activeKey: string
+  environments: EnvironmentItem[]
+}
+
 export interface PetOption {
   id: string
   name: string
@@ -73,6 +86,7 @@ export interface BootstrapConfig {
   }
   rooms: RoomOption[]
   pets: PetOption[]
+  debugWhitelist?: string[]
 }
 
 export interface ValidationIssue {
@@ -166,6 +180,21 @@ export interface RoomMediaCreateResult {
   }
   draftIssues: ValidationIssue[]
   state: AdminState
+}
+
+export interface ListenOrbUploadResult {
+  mediaUrl: string
+  key: string
+  contentType: string
+  size: number
+  inspect: {
+    fileName: string
+    width?: number
+    height?: number
+    duration?: number
+    codec?: string
+    warnings: string[]
+  }
 }
 
 export interface ActionVideoResult {

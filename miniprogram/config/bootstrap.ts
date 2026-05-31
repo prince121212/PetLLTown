@@ -79,6 +79,7 @@ export interface BootstrapConfig {
   }
   rooms: RoomOption[]
   pets: PetOption[]
+  debugWhitelist: string[]
 }
 
 export interface BootstrapFunctionResult {
@@ -97,8 +98,8 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
   homeHint: '它在听你说话',
   homeMedia: {
     backgroundVideoUrl: '',
-    petVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
-    listenOrbVideoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/listen-orb/listen-orb.mp4',
+    petVideoUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
+    listenOrbVideoUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/ui/listen-orb/listen-orb.mp4',
   },
   aiMemory: {
     shortTermMemoryMaxCount: 8,
@@ -182,7 +183,7 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       name: '初夏之风',
       subtitle: '林中小屋视频',
       kind: 'video',
-      mediaUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/ui/home-background/home-forest-cabin-bg.mp4',
+      mediaUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/ui/home-background/home-forest-cabin-bg.mp4',
       enabled: true,
     },
   ],
@@ -193,9 +194,9 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '安静黏人',
       frameOffset: 1,
       manifestKey: 'xiaotuanzi/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
-      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0090.png',
-      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0030.png',
+      videoUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/videos/xiaotuanzi-idle-alpha-pack-h.mp4',
+      thumbUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/frames/frame_0030.png',
       enabled: true
     },
     {
@@ -204,9 +205,9 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '眨眼撒娇',
       frameOffset: 15,
       manifestKey: 'danjuan/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/videos/danjuan-idle-alpha-pack-h.mp4',
-      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/frames/frame_0090.png',
-      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/danjuan/actions/idle/frames/frame_0030.png',
+      videoUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/danjuan/actions/idle/videos/danjuan-idle-alpha-pack-h.mp4',
+      thumbUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/danjuan/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/danjuan/actions/idle/frames/frame_0030.png',
       enabled: true
     },
     {
@@ -215,12 +216,13 @@ export const FALLBACK_BOOTSTRAP_CONFIG: BootstrapConfig = {
       subtitle: '圆脸热情',
       frameOffset: 20,
       manifestKey: 'maolizi/manifest.json',
-      videoUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/maolizi/actions/idle/videos/maolizi-idle-alpha-pack-h.mp4',
-      thumbUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/maolizi/actions/idle/frames/frame_0090.png',
-      listenFrameUrl: 'cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/maolizi/actions/idle/frames/frame_0030.png',
+      videoUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/maolizi/actions/idle/videos/maolizi-idle-alpha-pack-h.mp4',
+      thumbUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/maolizi/actions/idle/frames/frame_0090.png',
+      listenFrameUrl: 'cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/maolizi/actions/idle/frames/frame_0030.png',
       enabled: true
     },
   ],
+  debugWhitelist: [],
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -346,5 +348,8 @@ export function normalizeBootstrapConfig(value: unknown): BootstrapConfig {
     },
     rooms: rooms.length ? rooms : FALLBACK_BOOTSTRAP_CONFIG.rooms,
     pets: pets.length ? pets : FALLBACK_BOOTSTRAP_CONFIG.pets,
+    debugWhitelist: Array.isArray(value.debugWhitelist)
+      ? value.debugWhitelist.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : FALLBACK_BOOTSTRAP_CONFIG.debugWhitelist,
   }
 }

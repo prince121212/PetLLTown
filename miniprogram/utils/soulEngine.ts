@@ -1,3 +1,5 @@
+import { FALLBACK_PET_MANIFEST, inferActionAnchors, type PetAction, type PetActionAnchor } from '../config/petManifest'
+
 export interface PetState {
   energy: number
   affection: number
@@ -13,7 +15,282 @@ export interface PetState {
 
 const QUEUE_SIZE = 5
 
-const IDLE_LIKE_SCENES = ['idle', 'listening', 'reply', 'sleep-exit']
+const DEFAULT_ACTIONS = FALLBACK_PET_MANIFEST.actions
+
+export type PetActionIntent =
+  | 'natural'
+  | 'user_speak'
+  | 'ai_reply'
+  | 'touch'
+  | 'sleep_enter'
+  | 'sleep_exit'
+  | 'awake_idle'
+  | 'sleep_loop'
+  | 'awake_listening'
+  | 'awake_reply'
+
+export interface PetActionResolution {
+  action: PetAction
+  requestedId: string
+  fallbackChain: string[]
+  resolvedBy: 'requested' | 'fallback' | 'anchor-fallback' | 'default'
+}
+
+function normalizeActionId(value: string): string {
+  return String(value || '').trim().toLowerCase()
+}
+
+function actionId(action: PetAction | null | undefined): string | undefined {
+  return action ? action.id : undefined
+}
+
+function getActionPool(actions?: PetAction[] | null): PetAction[] {
+  const source = Array.isArray(actions) && actions.length ? actions : DEFAULT_ACTIONS
+  return source.filter((action) => Boolean(action) && typeof action.id === 'string')
+}
+
+function isPlayableAction(action?: PetAction | null): action is PetAction {
+  return Boolean(action && action.id && action.videoUrls && action.videoUrls.length && action.enabled !== false)
+}
+
+function getActionById(actions: PetAction[], actionId: string): PetAction | null {
+  const normalized = normalizeActionId(actionId)
+  return actions.find((action) => normalizeActionId(action.id) === normalized) || null
+}
+
+function getActionAnchor(action: PetAction | string | null | undefined): { start: PetActionAnchor; end: PetActionAnchor } {
+  if (!action) return { start: 'awake', end: 'awake' }
+
+  if (typeof action === 'string') {
+    const anchors = inferActionAnchors(action)
+    return { start: anchors.anchorStart, end: anchors.anchorEnd }
+  }
+
+  if (action.anchorStart && action.anchorEnd) {
+    return { start: action.anchorStart, end: action.anchorEnd }
+  }
+
+  const anchors = inferActionAnchors(action.id)
+  return { start: anchors.anchorStart, end: anchors.anchorEnd }
+}
+
+function isSleepTransition(actionId: string): boolean {
+  const normalized = normalizeActionId(actionId)
+  return normalized === 'transition-awake-to-sleep' || normalized === 'sleep-enter'
+}
+
+function isWakeTransition(actionId: string): boolean {
+  const normalized = normalizeActionId(actionId)
+  return normalized === 'sleep-exit' || normalized === 'transition-sleep-to-awake'
+}
+
+function pickFirstPlayable(actions: PetAction[], candidates: string[]): PetAction | null {
+  for (const candidate of candidates) {
+    const action = getActionById(actions, candidate)
+    if (isPlayableAction(action)) return action
+  }
+  return null
+}
+
+function getAwakeNaturalCandidates(state: PetState): string[] {
+  const mood = String(state.mood || '').trim()
+  const energy = Number(state.energy || 0)
+
+  if (mood.includes('困') || energy <= 30) {
+    return ['awake-idle-tired', 'awake-idle-sad', 'awake-idle-normal', 'awake-look-around', 'awake-tilt']
+  }
+  if (mood.includes('兴奋') || mood.includes('开心') || energy >= 80) {
+    return ['awake-idle-energetic', 'awake-idle-normal', 'awake-tail', 'awake-look-around', 'awake-scratch']
+  }
+  if (mood.includes('好奇') || mood.includes('温柔')) {
+    return ['awake-idle-normal', 'awake-look-around', 'awake-tilt', 'awake-lick']
+  }
+  if (mood.includes('低') || mood.includes('难过') || mood.includes('委屈')) {
+    return ['awake-idle-sad', 'awake-idle-normal', 'awake-look-around', 'awake-reply-sad']
+  }
+  return ['awake-idle-normal', 'awake-look-around', 'awake-tilt']
+}
+
+function getSleepNaturalCandidates(): string[] {
+  return ['sleep-loop', 'sleep-ear-twitch', 'sleep-tail-twitch', 'sleep-exit']
+}
+
+function getReplyCandidates(emotion?: string): string[] {
+  const normalized = String(emotion || '').trim().toLowerCase()
+  if (normalized === 'happy' || normalized === 'excited' || normalized === 'positive') {
+    return ['awake-reply-happy', 'awake-reply-normal', 'awake-listening']
+  }
+  if (normalized === 'shy' || normalized === 'comforted') {
+    return ['awake-reply-shy', 'awake-reply-normal', 'awake-listening']
+  }
+  if (normalized === 'confused' || normalized === 'question' || normalized === 'unknown') {
+    return ['awake-reply-confused', 'awake-tilt', 'awake-reply-normal', 'awake-listening']
+  }
+  if (normalized === 'sad' || normalized === 'sorry' || normalized === 'low') {
+    return ['awake-reply-sad', 'awake-idle-sad', 'awake-reply-normal', 'awake-listening']
+  }
+  return ['awake-reply-normal', 'awake-listening']
+}
+
+function getListeningCandidates(): string[] {
+  return ['awake-listening', 'awake-look-around', 'awake-tilt', 'awake-idle-normal']
+}
+
+function getTouchCandidates(): string[] {
+  return ['awake-touch-petting', 'awake-tail', 'awake-reply-happy', 'awake-reply-normal', 'awake-idle-normal']
+}
+
+function getSleepEnterCandidates(): string[] {
+  return ['transition-awake-to-sleep']
+}
+
+function getSleepExitCandidates(): string[] {
+  return ['transition-sleep-to-awake']
+}
+
+function resolveSameAnchorFallback(actions: PetAction[], requestedId: string, state: PetState): PetAction | null {
+  const normalized = normalizeActionId(requestedId)
+
+  if (normalized.startsWith('awake-idle-')) {
+    return pickFirstPlayable(actions, getAwakeNaturalCandidates(state))
+  }
+
+  if (normalized === 'awake-listening' || normalized === 'listening') {
+    return pickFirstPlayable(actions, getListeningCandidates())
+  }
+
+  if (normalized.startsWith('awake-reply-') || normalized === 'reply') {
+    return pickFirstPlayable(actions, ['awake-reply-normal', 'awake-listening', 'awake-idle-normal'])
+  }
+
+  if (normalized === 'awake-touch-petting' || normalized === 'touch-petting') {
+    return pickFirstPlayable(actions, getTouchCandidates())
+  }
+
+  if (normalized === 'sleep-loop') {
+    return pickFirstPlayable(actions, getSleepNaturalCandidates())
+  }
+
+  if (normalized === 'sleep-ear-twitch' || normalized === 'sleep-tail-twitch') {
+    return pickFirstPlayable(actions, ['sleep-ear-twitch', 'sleep-tail-twitch', 'sleep-loop'])
+  }
+
+  if (normalized === 'transition-awake-to-sleep' || normalized === 'sleep-enter') {
+    return pickFirstPlayable(actions, getSleepEnterCandidates())
+  }
+
+  if (normalized === 'transition-sleep-to-awake' || normalized === 'sleep-exit') {
+    return pickFirstPlayable(actions, getSleepExitCandidates())
+  }
+
+  return pickFirstPlayable(actions, [requestedId, 'awake-idle-normal', 'sleep-loop', 'transition-sleep-to-awake'])
+}
+
+export function resolvePlayableAction(
+  actions: PetAction[] | null | undefined,
+  requestedId: string,
+  state: PetState,
+): PetActionResolution | null {
+  const pool = getActionPool(actions)
+  const normalized = normalizeActionId(requestedId)
+  const direct = getActionById(pool, normalized)
+
+  if (isPlayableAction(direct)) {
+    return {
+      action: direct,
+      requestedId: normalized,
+      fallbackChain: [normalized],
+      resolvedBy: 'requested',
+    }
+  }
+
+  const fallbackChain = buildActionFallbackChain(normalized, state)
+  const fallback = pickFirstPlayable(pool, fallbackChain)
+
+  if (fallback) {
+    return {
+      action: fallback,
+      requestedId: normalized,
+      fallbackChain,
+      resolvedBy: fallback.id === normalized ? 'requested' : 'fallback',
+    }
+  }
+
+  return null
+}
+
+function buildActionFallbackChain(requestedId: string, state: PetState): string[] {
+  const normalized = normalizeActionId(requestedId)
+
+  if (normalized.startsWith('awake-idle-')) {
+    return Array.from(new Set([
+      normalized,
+      ...getAwakeNaturalCandidates(state),
+      'awake-listening',
+      'awake-look-around',
+    ]))
+  }
+
+  if (normalized === 'awake-listening' || normalized === 'listening') {
+    return Array.from(new Set([
+      normalized,
+      ...getListeningCandidates(),
+      ...getAwakeNaturalCandidates(state),
+    ]))
+  }
+
+  if (normalized.startsWith('awake-reply-') || normalized === 'reply') {
+    return Array.from(new Set([
+      normalized,
+      ...getReplyCandidates(state.mood),
+      ...getAwakeNaturalCandidates(state),
+      'awake-listening',
+    ]))
+  }
+
+  if (normalized === 'awake-touch-petting' || normalized === 'touch-petting') {
+    return Array.from(new Set([
+      normalized,
+      ...getTouchCandidates(),
+      ...getAwakeNaturalCandidates(state),
+    ]))
+  }
+
+  if (normalized === 'sleep-loop') {
+    return Array.from(new Set([
+      normalized,
+      ...getSleepNaturalCandidates(),
+      'transition-sleep-to-awake',
+    ]))
+  }
+
+  if (normalized === 'sleep-ear-twitch' || normalized === 'sleep-tail-twitch') {
+    return Array.from(new Set([
+      normalized,
+      'sleep-tail-twitch',
+      'sleep-ear-twitch',
+      'sleep-loop',
+    ]))
+  }
+
+  if (normalized === 'transition-awake-to-sleep' || normalized === 'sleep-enter') {
+    return [normalized, 'transition-awake-to-sleep']
+  }
+
+  if (normalized === 'transition-sleep-to-awake' || normalized === 'sleep-exit') {
+    return [normalized, 'transition-sleep-to-awake']
+  }
+
+  return Array.from(new Set([
+    normalized,
+    'awake-idle-normal',
+    'awake-listening',
+    'awake-reply-normal',
+    'awake-touch-petting',
+    'sleep-loop',
+    'transition-sleep-to-awake',
+  ]))
+}
 
 export function createDefaultState(): PetState {
   return {
@@ -109,44 +386,85 @@ export function setMood(state: PetState, mood: string): PetState {
   return { ...state, mood }
 }
 
-function isIdleLike(scene: string): boolean {
-  return IDLE_LIKE_SCENES.includes(scene)
+function decideNext(state: PetState, lastScene: string, actions: PetAction[] = DEFAULT_ACTIONS): string {
+  const pool = getActionPool(actions)
+  const normalizedLast = normalizeActionId(lastScene)
+  const lastAction = getActionById(pool, normalizedLast)
+  const lastAnchor = getActionAnchor(lastAction || normalizedLast).end
+
+  if (isSleepTransition(normalizedLast)) {
+    const resolved = resolveSameAnchorFallback(pool, 'sleep-loop', state)
+    return resolved ? resolved.id : normalizedLast
+  }
+
+  if (isWakeTransition(normalizedLast)) {
+    const resolved = resolveSameAnchorFallback(pool, 'awake-idle-normal', state)
+    return resolved ? resolved.id : normalizedLast
+  }
+
+  if (lastAnchor === 'sleep') {
+    if (state.sleepLoopCount < state.sleepTargetLoops) {
+      const sleeping = resolveSameAnchorFallback(pool, 'sleep-loop', state)
+      return sleeping ? sleeping.id : normalizedLast
+    }
+    const exitScene = pickFirstPlayable(pool, getSleepExitCandidates())
+    return exitScene ? exitScene.id : (actionId(resolveSameAnchorFallback(pool, 'sleep-loop', state)) || normalizedLast)
+  }
+
+  if (normalizedLast === 'awake-listening' || normalizedLast === 'listening') {
+    const reply = resolveSameAnchorFallback(pool, 'awake-reply-normal', state)
+    return reply ? reply.id : normalizedLast
+  }
+
+  if (normalizedLast === 'awake-touch-petting' || normalizedLast === 'touch-petting') {
+    const idle = resolveSameAnchorFallback(pool, 'awake-idle-normal', state)
+    return idle ? idle.id : normalizedLast
+  }
+
+  if (state.energy < 20) {
+    const enter = pickFirstPlayable(pool, getSleepEnterCandidates())
+    return enter ? enter.id : (actionId(resolveSameAnchorFallback(pool, 'awake-idle-tired', state)) || normalizedLast)
+  }
+
+  const idle = resolveSameAnchorFallback(pool, 'awake-idle-normal', state)
+  return idle ? idle.id : normalizedLast
 }
 
-function decideNext(state: PetState, lastScene: string): string {
-  if (lastScene === 'sleep-enter') return 'sleep-loop'
+function findPath(from: string, to: string, actions: PetAction[] = DEFAULT_ACTIONS): string[] {
+  const pool = getActionPool(actions)
+  const normalizedFrom = normalizeActionId(from)
+  const normalizedTo = normalizeActionId(to)
 
-  if (lastScene === 'sleep-loop') {
-    if (state.sleepLoopCount < state.sleepTargetLoops) return 'sleep-loop'
-    return 'sleep-exit'
+  if (normalizedFrom === normalizedTo) return [normalizedTo]
+
+  if (isSleepTransition(normalizedFrom)) {
+    return [actionId(resolveSameAnchorFallback(pool, 'sleep-loop', createDefaultState())) || 'sleep-loop', normalizedTo]
   }
 
-  if (lastScene === 'listening') return 'reply'
-
-  if (isIdleLike(lastScene)) {
-    if (state.energy < 20) return 'sleep-enter'
-    return 'idle'
+  if (isWakeTransition(normalizedFrom)) {
+    return [actionId(resolveSameAnchorFallback(pool, 'awake-idle-normal', createDefaultState())) || 'awake-idle-normal', normalizedTo]
   }
 
-  return 'idle'
+  const fromAnchor = getActionAnchor(normalizedFrom).end
+  const toAnchor = getActionAnchor(normalizedTo).start
+
+  if (fromAnchor === toAnchor) return [normalizedTo]
+
+  if (fromAnchor === 'awake' && toAnchor === 'sleep') {
+    const transition = pickFirstPlayable(pool, getSleepEnterCandidates())
+    return transition ? [transition.id, normalizedTo] : [normalizedFrom]
+  }
+
+  if (fromAnchor === 'sleep' && toAnchor === 'awake') {
+    const transition = pickFirstPlayable(pool, getSleepExitCandidates())
+    return transition ? [transition.id, normalizedTo] : [normalizedFrom]
+  }
+
+  return [normalizedTo]
 }
 
-function findPath(from: string, to: string): string[] {
-  if (isIdleLike(from)) return [to]
-
-  if (from === 'sleep-loop') {
-    if (to === 'sleep-loop' || to === 'sleep-exit') return [to]
-    return ['sleep-exit', to]
-  }
-
-  if (from === 'sleep-enter') {
-    return ['sleep-loop', 'sleep-exit', to]
-  }
-
-  return [to]
-}
-
-export function buildQueue(state: PetState, currentPlaying: string | null): string[] {
+export function buildQueue(state: PetState, currentPlaying: string | null, actions: PetAction[] = DEFAULT_ACTIONS): string[] {
+  const pool = getActionPool(actions)
   const queue: string[] = []
   let s = { ...state }
 
@@ -156,7 +474,7 @@ export function buildQueue(state: PetState, currentPlaying: string | null): stri
 
   while (queue.length < QUEUE_SIZE) {
     const last = queue[queue.length - 1] || 'idle'
-    const next = decideNext(s, last)
+    const next = decideNext(s, last, pool)
 
     if (next === 'sleep-enter' && s.sleepTargetLoops === 0) {
       s = { ...s, sleepTargetLoops: randInt(2, 6), sleepLoopCount: 0 }
@@ -171,29 +489,29 @@ export function buildQueue(state: PetState, currentPlaying: string | null): stri
   return queue
 }
 
-export function handleEvent(event: string, state: PetState, queue: string[]): { state: PetState; queue: string[] } {
+export function handleEvent(event: string, state: PetState, queue: string[], actions: PetAction[] = DEFAULT_ACTIONS): { state: PetState; queue: string[] } {
   let s = applyEvent(state, event)
   const playing = queue[0] || 'idle'
 
   let targetScene: string | null = null
-  if (event === 'user_speak') targetScene = 'listening'
-  if (event === 'energy_low') targetScene = 'sleep-enter'
-  if (event === 'energy_full') targetScene = 'sleep-exit'
+  if (event === 'user_speak') targetScene = 'awake-listening'
+  if (event === 'energy_low') targetScene = 'transition-awake-to-sleep'
+  if (event === 'energy_full') targetScene = 'transition-sleep-to-awake'
 
   if (!targetScene) {
     return { state: s, queue }
   }
 
-  const path = findPath(playing, targetScene)
+  const path = findPath(playing, targetScene, actions)
   const newQueue = [playing, ...path]
 
-  if (targetScene === 'sleep-enter') {
+  if (targetScene === 'transition-awake-to-sleep' || targetScene === 'sleep-enter') {
     s = { ...s, sleepTargetLoops: randInt(2, 6), sleepLoopCount: 0 }
   }
 
   while (newQueue.length < QUEUE_SIZE) {
     const last = newQueue[newQueue.length - 1]
-    const next = decideNext(s, last)
+    const next = decideNext(s, last, actions)
     if (next === 'sleep-loop') {
       s = { ...s, sleepLoopCount: s.sleepLoopCount + 1 }
     }
@@ -203,7 +521,7 @@ export function handleEvent(event: string, state: PetState, queue: string[]): { 
   return { state: s, queue: newQueue.slice(0, QUEUE_SIZE) }
 }
 
-export function advanceQueue(state: PetState, queue: string[]): { state: PetState; queue: string[]; next: string } {
+export function advanceQueue(state: PetState, queue: string[], actions: PetAction[] = DEFAULT_ACTIONS): { state: PetState; queue: string[]; next: string } {
   const next = queue.length > 0 ? queue[0] : 'idle'
   const remaining = queue.slice(1)
   let s = { ...state, currentScene: next }
@@ -211,15 +529,15 @@ export function advanceQueue(state: PetState, queue: string[]): { state: PetStat
   if (next === 'sleep-loop') {
     s.sleepLoopCount = s.sleepLoopCount + 1
   }
-  if ((next === 'sleep-exit' || next === 'idle') && (state.currentScene === 'sleep-loop' || state.currentScene === 'sleep-exit')) {
+  if ((next === 'sleep-exit' || next === 'transition-sleep-to-awake' || next === 'idle' || next === 'awake-idle-normal') && (state.currentScene === 'sleep-loop' || state.currentScene === 'sleep-exit' || state.currentScene === 'transition-sleep-to-awake')) {
     s.sleepLoopCount = 0
     s.sleepTargetLoops = 0
   }
 
   while (remaining.length < QUEUE_SIZE) {
     const last = remaining[remaining.length - 1] || next
-    const fill = decideNext(s, last)
-    if (fill === 'sleep-enter' && s.sleepTargetLoops === 0) {
+    const fill = decideNext(s, last, actions)
+    if ((fill === 'sleep-enter' || fill === 'transition-awake-to-sleep') && s.sleepTargetLoops === 0) {
       s = { ...s, sleepTargetLoops: randInt(2, 6), sleepLoopCount: 0 }
     }
     if (fill === 'sleep-loop') {
@@ -229,6 +547,88 @@ export function advanceQueue(state: PetState, queue: string[]): { state: PetStat
   }
 
   return { state: s, queue: remaining.slice(0, QUEUE_SIZE), next }
+}
+
+export function resolveAiReplyAction(state: PetState, emotion: string, actions: PetAction[] = DEFAULT_ACTIONS): string {
+  const pool = getActionPool(actions)
+  const resolved = resolveSameAnchorFallback(pool, getReplyCandidates(emotion)[0], state)
+  return resolved ? resolved.id : 'awake-reply-normal'
+}
+
+export function resolveNextActionByIntent(state: PetState, queue: string[], intent: PetActionIntent, actions: PetAction[] = DEFAULT_ACTIONS, emotion = ''): { state: PetState; queue: string[] } {
+  const pool = getActionPool(actions)
+  const current = queue[0] || 'idle'
+  const currentAnchor = getActionAnchor(getActionById(pool, current) || current).end
+
+  const resolveTarget = (targetId: string): string | null => {
+    const result = resolvePlayableAction(pool, targetId, state)
+    return result ? result.action.id : null
+  }
+
+  let target: string | null = null
+  let transition: string | null = null
+
+  if (intent === 'user_speak' || intent === 'awake_listening') {
+    target = resolveTarget('awake-listening')
+  } else if (intent === 'touch') {
+    target = resolveTarget('awake-touch-petting')
+  } else if (intent === 'sleep_enter') {
+    transition = actionId(pickFirstPlayable(pool, getSleepEnterCandidates())) || null
+    target = transition || resolveTarget('awake-idle-tired') || resolveTarget('awake-idle-normal')
+  } else if (intent === 'sleep_exit') {
+    transition = actionId(pickFirstPlayable(pool, getSleepExitCandidates())) || null
+    target = transition || resolveTarget('sleep-loop')
+  } else if (intent === 'ai_reply') {
+    target = resolveTarget(resolveAiReplyAction(state, emotion, pool))
+  } else if (intent === 'awake_reply') {
+    target = resolveTarget(resolveAiReplyAction(state, emotion, pool))
+  } else if (intent === 'sleep_loop') {
+    target = resolveTarget('sleep-loop')
+  } else {
+    target = resolveTarget(actionId(resolveSameAnchorFallback(pool, 'awake-idle-normal', state)) || 'awake-idle-normal')
+  }
+
+  if (!target) {
+    return { state, queue }
+  }
+
+  const targetAnchor = getActionAnchor(getActionById(pool, target) || target).start
+  const path: string[] = []
+
+  if (currentAnchor === 'sleep' && targetAnchor === 'awake' && !isWakeTransition(current)) {
+    const wake = pickFirstPlayable(pool, getSleepExitCandidates())
+    if (wake) {
+      path.push(wake.id)
+    } else {
+      const safeSleep = resolveSameAnchorFallback(pool, 'sleep-loop', state)
+      return { state, queue: safeSleep ? [current, safeSleep.id] : queue }
+    }
+  }
+
+  if (currentAnchor === 'awake' && targetAnchor === 'sleep' && !isSleepTransition(current)) {
+    const sleep = pickFirstPlayable(pool, getSleepEnterCandidates())
+    if (sleep) {
+      path.push(sleep.id)
+    } else {
+      const safeAwake = resolveSameAnchorFallback(pool, 'awake-idle-tired', state)
+      return { state, queue: safeAwake ? [current, safeAwake.id] : queue }
+    }
+  }
+
+  const resolvedTarget = target
+  if (resolvedTarget !== current) {
+    path.push(resolvedTarget)
+  }
+
+  const nextQueue = [current, ...path]
+
+  while (nextQueue.length < QUEUE_SIZE) {
+    const last = nextQueue[nextQueue.length - 1]
+    const fill = decideNext(state, last, pool)
+    nextQueue.push(fill)
+  }
+
+  return { state, queue: nextQueue.slice(0, QUEUE_SIZE) }
 }
 
 export function computeRelationship(consecutiveDays: number): { icon: string; text: string } {

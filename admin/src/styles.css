@@ -157,6 +157,63 @@ button {
   margin: 0;
 }
 
+.env-switcher {
+  align-items: center;
+  background: #eef2f8;
+  border: 1px solid #cdd8d0;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 10px;
+}
+
+.env-switcher-dot {
+  background: #2e7d46;
+  border-radius: 50%;
+  height: 8px;
+  width: 8px;
+}
+
+.env-switcher-select {
+  background: transparent;
+  border: none;
+  color: #17211b;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+}
+
+.env-switcher-danger {
+  background: #fdecec;
+  border-color: #e2a3a3;
+}
+
+.env-switcher-danger .env-switcher-dot {
+  background: #c0392b;
+}
+
+.env-switcher-danger .env-switcher-select {
+  color: #a02b1c;
+}
+
+.topbar-danger {
+  border-bottom: 2px solid #e2a3a3;
+  padding-bottom: 12px;
+}
+
+.topbar-danger h1::after {
+  background: #fdecec;
+  border-radius: 999px;
+  color: #a02b1c;
+  content: '正式环境';
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 10px;
+  padding: 3px 10px;
+  vertical-align: middle;
+}
+
 .icon-button,
 .primary-button,
 .secondary-button,
@@ -774,6 +831,17 @@ th {
   border-radius: 8px;
   min-height: 40px;
   padding: 8px 10px;
+}
+
+.whitelist-textarea {
+  background: #fbfcfb;
+  border: 1px solid #cfdad2;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  resize: vertical;
 }
 
 .button-row {

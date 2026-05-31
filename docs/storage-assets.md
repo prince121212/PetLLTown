@@ -3,7 +3,7 @@
 当前 demo 帧已经上传到云存储：
 
 ```text
-cloud://cloud1-d0gz0y40r67b3198e.636c-cloud1-d0gz0y40r67b3198e-1396635429/pets/xiaotuanzi/actions/idle/frames/frame_0001.png
+cloud://pet-dev-d6gpc4gw88ca1aa43.7065-pet-dev-d6gpc4gw88ca1aa43-1438790868/pets/xiaotuanzi/actions/idle/frames/frame_0001.png
 ```
 
 对应目录：

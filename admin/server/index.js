@@ -20,12 +20,67 @@ const upload = multer({ dest: path.join(tmpRoot, 'uploads') })
 
 loadEnvFile(path.join(root, '.env.local'))
 
-const envId = requiredEnv('CLOUDBASE_ENV_ID', 'TCB_ENV_ID')
-const secretId = requiredEnv('TENCENTCLOUD_SECRET_ID')
-const secretKey = requiredEnv('TENCENTCLOUD_SECRET_KEY')
-const region = process.env.CLOUDBASE_REGION || process.env.COS_REGION || process.env.TENCENTCLOUD_REGION || 'ap-shanghai'
-const cosBucket = requiredEnv('COS_BUCKET', 'TCB_STORAGE_BUCKET')
-const cosRegion = process.env.COS_REGION || process.env.TENCENTCLOUD_REGION || region
+const defaultRegion = process.env.CLOUDBASE_REGION || process.env.COS_REGION || process.env.TENCENTCLOUD_REGION || 'ap-shanghai'
+
+// 预置可切换的数据源环境。test 与 prod 分属两个腾讯云账号，各自携带密钥。
+// 切换时连账号密钥一起切，因此 cloudbase/manager/cos 客户端都会按目标环境重建。
+const ENVIRONMENTS = [
+  {
+    key: 'test',
+    label: '测试环境',
+    envId: 'cloud1-d0gz0y40r67b3198e',
+    cosBucket: '636c-cloud1-d0gz0y40r67b3198e-1396635429',
+    region: 'ap-shanghai',
+    secretId: process.env.TENCENTCLOUD_SECRET_ID_TEST || '',
+    secretKey: process.env.TENCENTCLOUD_SECRET_KEY_TEST || '',
+    danger: false,
+  },
+  {
+    key: 'prod',
+    label: '正式环境',
+    envId: 'pet-dev-d6gpc4gw88ca1aa43',
+    cosBucket: '7065-pet-dev-d6gpc4gw88ca1aa43-1438790868',
+    region: 'ap-shanghai',
+    secretId: process.env.TENCENTCLOUD_SECRET_ID_PROD || process.env.TENCENTCLOUD_SECRET_ID || '',
+    secretKey: process.env.TENCENTCLOUD_SECRET_KEY_PROD || process.env.TENCENTCLOUD_SECRET_KEY || '',
+    danger: true,
+  },
+]
+
+// 默认环境：优先匹配 .env.local 里 CLOUDBASE_ENV_ID 指向的环境，否则用第一个。
+const envFromFile = process.env.CLOUDBASE_ENV_ID || process.env.TCB_ENV_ID || ''
+const defaultEnvironment = ENVIRONMENTS.find((item) => item.envId === envFromFile) || ENVIRONMENTS[0]
+
+// 当前激活环境派生的运行时状态，切换时由 activateEnvironment 重建（用 let 以便重新赋值）。
+let activeEnvKey = defaultEnvironment.key
+let envId = defaultEnvironment.envId
+let cosBucket = defaultEnvironment.cosBucket
+let region = defaultEnvironment.region || defaultRegion
+let cosRegion = defaultEnvironment.region || defaultRegion
+let app = null
+let manager = null
+let cos = null
+
+function getActiveEnvironment() {
+  return ENVIRONMENTS.find((item) => item.key === activeEnvKey) || defaultEnvironment
+}
+
+function activateEnvironment(target) {
+  const sid = target.secretId
+  const skey = target.secretKey
+  if (!sid || !skey) {
+    throw new Error(`环境「${target.label}」缺少密钥，请在 .env.local 配置 TENCENTCLOUD_SECRET_ID_${String(target.key).toUpperCase()} / _SECRET_KEY_${String(target.key).toUpperCase()}`)
+  }
+  activeEnvKey = target.key
+  envId = target.envId
+  cosBucket = target.cosBucket
+  region = target.region || defaultRegion
+  cosRegion = target.region || defaultRegion
+  app = cloudbase.init({ env: envId, secretId: sid, secretKey: skey, region })
+  manager = CloudBaseManager.init({ envId, secretId: sid, secretKey: skey, region })
+  cos = new COS({ SecretId: sid, SecretKey: skey })
+  return getActiveEnvironment()
+}
 const CONFIG_COLLECTION = 'app_configs'
 const DRAFT_COLLECTION = 'admin_config_drafts'
 const VERSION_COLLECTION = 'admin_config_versions'
@@ -151,9 +206,7 @@ const DATA_VIEW_DEFS = [
   },
 ]
 const DATA_VIEW_MAP = new Map(DATA_VIEW_DEFS.map((item) => [item.collection, item]))
-const app = cloudbase.init({ env: envId, secretId, secretKey, region })
-const manager = CloudBaseManager.init({ envId, secretId, secretKey, region })
-const cos = new COS({ SecretId: secretId, SecretKey: secretKey })
+activateEnvironment(defaultEnvironment)
 const server = express()
 
 await fsp.mkdir(path.join(tmpRoot, 'uploads'), { recursive: true })
@@ -163,6 +216,52 @@ server.use(express.json({ limit: '10mb' }))
 
 server.get('/api/health', (_request, response) => {
   response.json({ ok: true, data: { envId, serverTime: new Date().toISOString() } })
+})
+
+server.get('/api/environments', (_request, response) => {
+  const active = getActiveEnvironment()
+  response.json({
+    ok: true,
+    data: {
+      activeKey: active.key,
+      environments: ENVIRONMENTS.map((item) => ({
+        key: item.key,
+        label: item.label,
+        envId: item.envId,
+        danger: Boolean(item.danger),
+        active: item.key === active.key,
+      })),
+    },
+  })
+})
+
+server.post('/api/environment', async (request, response) => {
+  await handle(response, async () => {
+    const key = request.body && request.body.key
+    const target = ENVIRONMENTS.find((item) => item.key === key)
+    if (!target) {
+      const error = new Error(`未知环境：${key}`)
+      error.statusCode = 400
+      throw error
+    }
+
+    if (target.key !== activeEnvKey) {
+      activateEnvironment(target)
+      await ensureRequiredCollections()
+    }
+
+    const active = getActiveEnvironment()
+    return {
+      activeKey: active.key,
+      environments: ENVIRONMENTS.map((item) => ({
+        key: item.key,
+        label: item.label,
+        envId: item.envId,
+        danger: Boolean(item.danger),
+        active: item.key === active.key,
+      })),
+    }
+  })
 })
 
 server.get('/api/data/catalog', async (_request, response) => {
@@ -936,6 +1035,72 @@ server.post('/api/media/rooms/create-from-media', upload.single('source'), async
   })
 })
 
+server.post('/api/media/home/listen-orb', upload.single('source'), async (request, response) => {
+  await handle(response, async () => {
+    const sourceFile = request.file
+
+    if (!sourceFile) {
+      const error = new Error('请上传光球视频素材')
+      error.statusCode = 400
+      throw error
+    }
+
+    try {
+      const extension = path.extname(sourceFile.originalname || '').toLowerCase()
+      if (!['.mp4', '.webm', '.mov'].includes(extension)) {
+        const error = new Error('光球视频只支持 mp4、webm、mov')
+        error.statusCode = 400
+        throw error
+      }
+
+      const warnings = []
+      const probe = await ffprobe(sourceFile.path)
+      const video = probe.streams.find((stream) => stream.codec_type === 'video')
+
+      if (!video) {
+        const error = new Error('没有检测到可用的视频轨道')
+        error.statusCode = 400
+        throw error
+      }
+
+      if (!['h264', 'vp8', 'vp9'].includes(String(video.codec_name || ''))) {
+        warnings.push(`视频编码为 ${video.codec_name || 'unknown'}，小程序端可能需要转码后再使用`)
+      }
+
+      const fileExt = extension || '.mp4'
+      const key = `ui/listen-orb/${formatTimestamp(new Date())}${fileExt}`
+      const contentType = normalizeContentType({ kind: 'video', extension, mimeType: sourceFile.mimetype })
+
+      await uploadToCos(sourceFile.path, key, contentType)
+      const mediaUrl = cloudUrl(key)
+
+      await writeAuditLog({
+        action: 'uploadListenOrbVideo',
+        target: key,
+        summary: '上传倾听光球视频到云存储',
+        source: request.ip || 'admin-server',
+      })
+
+      return {
+        mediaUrl,
+        key,
+        contentType,
+        size: sourceFile.size,
+        inspect: {
+          fileName: sourceFile.originalname,
+          width: Number(video.width || 0),
+          height: Number(video.height || 0),
+          duration: Number(probe.format?.duration || 0),
+          codec: String(video.codec_name || ''),
+          warnings,
+        },
+      }
+    } finally {
+      await fsp.rm(sourceFile.path, { force: true }).catch(() => undefined)
+    }
+  })
+})
+
 const port = Number(process.env.ADMIN_SERVER_PORT || 8787)
 server.listen(port, () => {
   console.log(`admin server listening on http://127.0.0.1:${port}`)
@@ -1388,59 +1553,274 @@ function buildPetManifest({ petId, name, audioUrl }) {
     manifestVersion: `${formatDate(new Date())}-${petId}-001`,
     petId,
     name,
-    defaultState: 'idle',
+    defaultState: 'awake-idle-normal',
     actions: [
       {
-        id: 'idle',
-        type: 'loop',
-        label: '待机',
-        fps: 24,
-        next: ['idle', 'listening'],
-        videoUrls: [],
-        audioUrl: audioUrl || '',
-      },
-      {
-        id: 'listening',
-        type: 'loop',
-        label: '倾听',
-        fps: 24,
-        next: ['reply', 'idle'],
-        videoUrls: [],
-      },
-      {
-        id: 'reply',
-        type: 'transition',
-        label: '回应',
-        fps: 24,
-        next: ['idle'],
-        videoUrls: [],
-      },
-      {
-        id: 'sleep-enter',
+        id: 'transition-awake-to-sleep',
         type: 'transition',
         label: '入睡过渡',
         fps: 24,
         next: ['sleep-loop'],
         videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'sleep',
+        tags: ['transition', 'awake', 'sleep'],
+        weight: 1,
       },
       {
-        id: 'sleep-loop',
-        type: 'loop',
-        label: '睡眠循环',
-        fps: 24,
-        next: ['sleep-loop', 'sleep-exit'],
-        videoUrls: [],
-      },
-      {
-        id: 'sleep-exit',
+        id: 'transition-sleep-to-awake',
         type: 'transition',
         label: '唤醒过渡',
         fps: 24,
-        next: ['idle'],
+        next: ['awake-idle-normal'],
         videoUrls: [],
+        anchorStart: 'sleep',
+        anchorEnd: 'awake',
+        tags: ['transition', 'sleep', 'awake'],
+        weight: 1,
+      },
+      {
+        id: 'sleep-loop',
+        type: 'anchor',
+        label: '睡眠循环',
+        fps: 24,
+        next: ['sleep-loop', 'sleep-ear-twitch', 'sleep-tail-twitch', 'transition-sleep-to-awake'],
+        videoUrls: [],
+        anchorStart: 'sleep',
+        anchorEnd: 'sleep',
+        tags: ['sleep', 'loop'],
+        weight: 1,
+      },
+      {
+        id: 'sleep-ear-twitch',
+        type: 'anchor',
+        label: '睡眠耳动',
+        fps: 24,
+        next: ['sleep-loop', 'sleep-tail-twitch'],
+        videoUrls: [],
+        anchorStart: 'sleep',
+        anchorEnd: 'sleep',
+        tags: ['sleep', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'sleep-tail-twitch',
+        type: 'anchor',
+        label: '睡眠尾动',
+        fps: 24,
+        next: ['sleep-loop', 'sleep-ear-twitch'],
+        videoUrls: [],
+        anchorStart: 'sleep',
+        anchorEnd: 'sleep',
+        tags: ['sleep', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-idle-normal',
+        type: 'anchor',
+        label: '清醒待机',
+        fps: 24,
+        next: ['awake-idle-energetic', 'awake-idle-tired', 'awake-idle-sad', 'awake-look-around', 'awake-listening', 'awake-touch-petting', 'transition-awake-to-sleep'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'idle'],
+        weight: 1,
+      },
+      {
+        id: 'awake-idle-energetic',
+        type: 'anchor',
+        label: '清醒活跃待机',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-tail', 'awake-look-around'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'idle'],
+        weight: 1,
+      },
+      {
+        id: 'awake-idle-tired',
+        type: 'anchor',
+        label: '清醒疲惫待机',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-yawn', 'transition-awake-to-sleep'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'idle'],
+        weight: 1,
+      },
+      {
+        id: 'awake-idle-sad',
+        type: 'anchor',
+        label: '清醒低落待机',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-look-around', 'awake-reply-sad'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'idle'],
+        weight: 1,
+      },
+      {
+        id: 'awake-scratch',
+        type: 'anchor',
+        label: '挠痒',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-look-around'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-lick',
+        type: 'anchor',
+        label: '舔爪',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-look-around'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-yawn',
+        type: 'anchor',
+        label: '哈欠',
+        fps: 24,
+        next: ['awake-idle-tired', 'awake-idle-normal'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-tilt',
+        type: 'anchor',
+        label: '歪头',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-listening', 'awake-reply-confused'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-tail',
+        type: 'anchor',
+        label: '摇尾',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-reply-happy'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-look-around',
+        type: 'anchor',
+        label: '环顾',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-listening', 'awake-tilt'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'micro'],
+        weight: 1,
+      },
+      {
+        id: 'awake-listening',
+        type: 'anchor',
+        label: '倾听',
+        fps: 24,
+        next: ['awake-reply-normal', 'awake-idle-normal', 'awake-tilt'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'listen'],
+        weight: 1,
+      },
+      {
+        id: 'awake-reply-normal',
+        type: 'anchor',
+        label: '回应',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-listening'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'reply'],
+        weight: 1,
+      },
+      {
+        id: 'awake-reply-happy',
+        type: 'anchor',
+        label: '开心回应',
+        fps: 24,
+        next: ['awake-idle-energetic', 'awake-idle-normal'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'reply'],
+        weight: 1,
+      },
+      {
+        id: 'awake-reply-shy',
+        type: 'anchor',
+        label: '害羞回应',
+        fps: 24,
+        next: ['awake-idle-normal', 'awake-idle-sad'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'reply'],
+        weight: 1,
+      },
+      {
+        id: 'awake-reply-confused',
+        type: 'anchor',
+        label: '疑惑回应',
+        fps: 24,
+        next: ['awake-tilt', 'awake-idle-normal'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'reply'],
+        weight: 1,
+      },
+      {
+        id: 'awake-reply-sad',
+        type: 'anchor',
+        label: '低落回应',
+        fps: 24,
+        next: ['awake-idle-sad', 'awake-idle-normal'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'reply'],
+        weight: 1,
+      },
+      {
+        id: 'awake-touch-petting',
+        type: 'anchor',
+        label: '抚摸反馈',
+        fps: 24,
+        next: ['awake-tail', 'awake-reply-happy', 'awake-idle-normal'],
+        videoUrls: [],
+        anchorStart: 'awake',
+        anchorEnd: 'awake',
+        tags: ['awake', 'touch'],
+        weight: 1,
       },
     ],
-    sounds: audioUrl ? [{ id: 'idle-loop', url: audioUrl, loop: true }] : [],
+    sounds: audioUrl ? [{ id: 'awake-idle-normal-loop', url: audioUrl, loop: true }] : [],
     personality: {
       tone: 'warm',
       replyStyle: '短句、亲近、像一只认真陪伴你的小宠物',
@@ -1454,7 +1834,15 @@ async function readPublishedConfig() {
   const record = await getDocument(CONFIG_COLLECTION, CONFIG_DOC_ID).catch(() => null)
 
   if (!record || record.enabled === false) {
-    return localConfig
+    // 云端 app_configs 还没数据（如全新环境）：保留配置骨架，但清空宠物与背景，
+    // 让后台显示干净白板，上传素材时从零累加，而不是误显示本地预置的示例数据。
+    return {
+      ...localConfig,
+      pets: [],
+      rooms: [],
+      defaultPetId: '',
+      defaultRoomId: '',
+    }
   }
 
   return normalizeConfig(record.config || record)

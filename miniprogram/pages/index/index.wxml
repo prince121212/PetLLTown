@@ -80,9 +80,9 @@
       </view>
     </view>
 
-    <!-- 右侧调试面板 -->
-    <view class="debug-toggle" bindtap="toggleDebug">{{debugOpen ? '✕' : '🔍'}}</view>
-    <view wx:if="{{debugOpen}}" class="debug-panel">
+    <!-- 右侧调试面板（仅白名单用户可见） -->
+    <view wx:if="{{debugAllowed}}" class="debug-toggle" bindtap="toggleDebug">{{debugOpen ? '✕' : '🔍'}}</view>
+    <view wx:if="{{debugAllowed && debugOpen}}" class="debug-panel">
       <view class="debug-section">
         <text class="debug-title">播放队列</text>
         <view class="debug-queue">

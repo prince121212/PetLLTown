@@ -55,8 +55,8 @@ npm run seed:cloudbase -- --apply
 CloudBase 信息：
 
 ```text
-环境 ID：cloud1-d0gz0y40r67b3198e
-存储桶：636c-cloud1-d0gz0y40r67b3198e-1396635429
+环境 ID：pet-dev-d6gpc4gw88ca1aa43
+存储桶：7065-pet-dev-d6gpc4gw88ca1aa43-1438790868
 区域：ap-shanghai
 ```
 

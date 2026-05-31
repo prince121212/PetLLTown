@@ -18,6 +18,8 @@ import {
   getTimeOfDay,
   handleEvent as soulHandleEvent,
   moodToIcon,
+  resolveNextActionByIntent,
+  resolvePlayableAction,
   setMood,
   tick as soulTick,
   updateConsecutiveDays,
@@ -86,6 +88,7 @@ interface PageData {
   debugMemoryParseMode: string
   debugQueue: string[]
   debugOpen: boolean
+  debugAllowed: boolean
   activePetIndex: number
   activeRoomIndex: number
   authReady: boolean
@@ -615,6 +618,7 @@ Component({
     debugMemoryParseMode: '',
     debugQueue: [] as string[],
     debugOpen: false,
+    debugAllowed: false,
     activePetIndex: 0,
     activeRoomIndex: Math.max(0, FALLBACK_BOOTSTRAP_CONFIG.rooms.findIndex((r) => r.id === FALLBACK_BOOTSTRAP_CONFIG.defaultRoomId)),
     authReady: false,
@@ -818,8 +822,8 @@ Component({
       if (petVideoGl && petVideoProgram) {
         petVideoRenderPaused = false
         if (petManifestActions.length > 0) {
-          petSceneQueue = buildQueue(petState, null)
-          const result = advanceQueue(petState, petSceneQueue)
+          petSceneQueue = buildQueue(petState, null, petManifestActions)
+          const result = advanceQueue(petState, petSceneQueue, petManifestActions)
           petState = result.state
           petSceneQueue = result.queue
           this.playScene(result.next)
@@ -994,7 +998,7 @@ Component({
     },
 
     onSceneEnded() {
-      const result = advanceQueue(petState, petSceneQueue)
+      const result = advanceQueue(petState, petSceneQueue, petManifestActions)
       petState = result.state
       petSceneQueue = result.queue
       this.playScene(result.next)
@@ -1002,7 +1006,8 @@ Component({
     },
 
     playScene(sceneId: string) {
-      const action = petManifestActions.find((a) => a.id === sceneId)
+      const resolved = resolvePlayableAction(petManifestActions, sceneId, petState)
+      const action = resolved ? resolved.action : null
       if (action && action.videoUrls && action.videoUrls.length) {
         const videoUrl = action.videoUrls[Math.floor(Math.random() * action.videoUrls.length)]
         const audioUrl = action.audioUrl || ''
@@ -1018,7 +1023,8 @@ Component({
 
     async prepareNextDecoder() {
       const nextScene = petSceneQueue.length > 0 ? petSceneQueue[0] : 'idle'
-      const action = petManifestActions.find((a) => a.id === nextScene)
+      const resolved = resolvePlayableAction(petManifestActions, nextScene, petState)
+      const action = resolved ? resolved.action : null
       if (!action || !action.videoUrls || !action.videoUrls.length) return
 
       const videoUrl = action.videoUrls[Math.floor(Math.random() * action.videoUrls.length)]
@@ -1589,6 +1595,8 @@ Component({
           return
         }
 
+        const meta = response.result.meta as Record<string, unknown> | undefined
+        this.setData({ debugAllowed: Boolean(meta && meta.debugEnabled === true) })
         this.applyBootstrapConfig(normalizeBootstrapConfig(response.result.data))
       } catch (error) {
         console.warn('[index] bootstrap fallback:', error)
@@ -1686,14 +1694,14 @@ Component({
         petState = soulTick(petState, 30)
 
         if (petState.mood === '疲倦' && prevMood !== '疲倦' && petState.currentScene !== 'sleep-loop' && petState.currentScene !== 'sleep-enter') {
-          const result = soulHandleEvent('energy_low', petState, petSceneQueue)
+          const result = soulHandleEvent('energy_low', petState, petSceneQueue, petManifestActions)
           petState = result.state
           petSceneQueue = result.queue
           this.prepareNextDecoder()
         }
 
         if (petState.energy >= 80 && petState.currentScene === 'sleep-loop') {
-          const result = soulHandleEvent('energy_full', petState, petSceneQueue)
+          const result = soulHandleEvent('energy_full', petState, petSceneQueue, petManifestActions)
           petState = result.state
           petSceneQueue = result.queue
           this.prepareNextDecoder()
@@ -2145,7 +2153,7 @@ Component({
       }
 
       this.setData({ orbPressed: true })
-      const result = soulHandleEvent('user_speak', petState, petSceneQueue)
+      const result = soulHandleEvent('user_speak', petState, petSceneQueue, petManifestActions)
       petState = result.state
       petSceneQueue = result.queue
       this.syncPanelUI()
@@ -2747,7 +2755,7 @@ Component({
           const moodMap: Record<string, string> = { happy: '开心', curious: '好奇', gentle: '温柔', sleepy: '困了', excited: '兴奋' }
           petState = setMood(petState, moodMap[emotion] || '开心')
         }
-        this.applyAiNextAction(nextAction)
+        this.applyAiNextAction(nextAction, emotion)
         chatHistory.push({ user: text, pet: reply })
         if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory.shift()
         this.syncPanelUI()
@@ -2770,20 +2778,30 @@ Component({
       }
     },
 
-    applyAiNextAction(nextAction: string) {
-      if (!nextAction || nextAction === 'idle') return
+    applyAiNextAction(nextAction: string, emotion = '') {
+      if (!nextAction) return
 
-      if (nextAction === 'sleep-enter') {
-        const result = soulHandleEvent('energy_low', petState, petSceneQueue)
-        petState = result.state
-        petSceneQueue = result.queue
-        this.prepareNextDecoder()
-      } else if (nextAction === 'listening') {
-        const result = soulHandleEvent('user_speak', petState, petSceneQueue)
-        petState = result.state
-        petSceneQueue = result.queue
-        this.prepareNextDecoder()
+      const normalized = nextAction.trim().toLowerCase()
+      let intent: 'natural' | 'user_speak' | 'ai_reply' | 'touch' | 'sleep_enter' | 'sleep_exit' = 'natural'
+
+      if (normalized === 'sleep-enter' || normalized === 'transition-awake-to-sleep') {
+        intent = 'sleep_enter'
+      } else if (normalized === 'sleep-exit' || normalized === 'transition-sleep-to-awake') {
+        intent = 'sleep_exit'
+      } else if (normalized === 'listening' || normalized === 'awake-listening') {
+        intent = 'user_speak'
+      } else if (normalized === 'awake-touch-petting' || normalized === 'touch-petting') {
+        intent = 'touch'
+      } else if (normalized.startsWith('awake-reply-') || normalized === 'reply') {
+        intent = 'ai_reply'
+      } else if (normalized === 'awake-idle-normal' || normalized === 'idle') {
+        intent = 'natural'
       }
+
+      const result = resolveNextActionByIntent(petState, petSceneQueue, intent, petManifestActions, emotion)
+      petState = result.state
+      petSceneQueue = result.queue
+      this.prepareNextDecoder()
     },
 
     setVoiceError(message: string) {

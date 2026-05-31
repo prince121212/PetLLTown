@@ -1,21 +1,37 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "2026-05-19-maolizi-002",
-  "petId": "maolizi",
-  "name": "毛栗子",
-  "defaultState": "idle",
+  "manifestVersion": "2026-05-23-xiaotuanzi-003",
+  "petId": "xiaotuanzi",
+  "name": "小团子",
+  "defaultState": "awake-idle-normal",
   "actions": [
-    { "id": "idle", "type": "loop", "label": "待机", "fps": 24, "next": ["idle", "listening"], "videoUrls": [] },
-    { "id": "listening", "type": "loop", "label": "倾听", "fps": 24, "next": ["reply", "idle"], "videoUrls": [] },
-    { "id": "reply", "type": "transition", "label": "回应", "fps": 24, "next": ["idle"], "videoUrls": [] },
-    { "id": "sleep-enter", "type": "transition", "label": "入睡过渡", "fps": 24, "next": ["sleep-loop"], "videoUrls": [] },
-    { "id": "sleep-loop", "type": "loop", "label": "睡眠循环", "fps": 24, "next": ["sleep-loop", "sleep-exit"], "videoUrls": [] },
-    { "id": "sleep-exit", "type": "transition", "label": "唤醒过渡", "fps": 24, "next": ["idle"], "videoUrls": [] }
+    { "id": "transition-awake-to-sleep", "type": "transition", "label": "入睡过渡", "fps": 15, "next": ["sleep-loop"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "sleep", "tags": ["transition", "awake", "sleep"], "weight": 1 },
+    { "id": "transition-sleep-to-awake", "type": "transition", "label": "唤醒过渡", "fps": 15, "next": ["awake-idle-normal"], "videoUrls": [], "anchorStart": "sleep", "anchorEnd": "awake", "tags": ["transition", "sleep", "awake"], "weight": 1 },
+    { "id": "sleep-loop", "type": "anchor", "label": "睡眠循环", "fps": 15, "next": ["sleep-loop", "sleep-ear-twitch", "sleep-tail-twitch", "transition-sleep-to-awake"], "videoUrls": [], "anchorStart": "sleep", "anchorEnd": "sleep", "tags": ["sleep", "loop"], "weight": 1 },
+    { "id": "sleep-ear-twitch", "type": "anchor", "label": "睡眠耳动", "fps": 15, "next": ["sleep-loop", "sleep-tail-twitch"], "videoUrls": [], "anchorStart": "sleep", "anchorEnd": "sleep", "tags": ["sleep", "micro"], "weight": 1 },
+    { "id": "sleep-tail-twitch", "type": "anchor", "label": "睡眠尾动", "fps": 15, "next": ["sleep-loop", "sleep-ear-twitch"], "videoUrls": [], "anchorStart": "sleep", "anchorEnd": "sleep", "tags": ["sleep", "micro"], "weight": 1 },
+    { "id": "awake-idle-normal", "type": "anchor", "label": "清醒待机", "fps": 15, "next": ["awake-idle-energetic", "awake-idle-tired", "awake-idle-sad", "awake-look-around", "awake-listening", "awake-touch-petting", "transition-awake-to-sleep"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "idle"], "weight": 1 },
+    { "id": "awake-idle-energetic", "type": "anchor", "label": "清醒活跃待机", "fps": 15, "next": ["awake-idle-normal", "awake-tail", "awake-look-around"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "idle"], "weight": 1 },
+    { "id": "awake-idle-tired", "type": "anchor", "label": "清醒疲惫待机", "fps": 15, "next": ["awake-idle-normal", "awake-yawn", "transition-awake-to-sleep"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "idle"], "weight": 1 },
+    { "id": "awake-idle-sad", "type": "anchor", "label": "清醒低落待机", "fps": 15, "next": ["awake-idle-normal", "awake-look-around", "awake-reply-sad"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "idle"], "weight": 1 },
+    { "id": "awake-scratch", "type": "anchor", "label": "挠痒", "fps": 15, "next": ["awake-idle-normal", "awake-look-around"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-lick", "type": "anchor", "label": "舔爪", "fps": 15, "next": ["awake-idle-normal", "awake-look-around"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-yawn", "type": "anchor", "label": "哈欠", "fps": 15, "next": ["awake-idle-tired", "awake-idle-normal"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-tilt", "type": "anchor", "label": "歪头", "fps": 15, "next": ["awake-idle-normal", "awake-listening", "awake-reply-confused"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-tail", "type": "anchor", "label": "摇尾", "fps": 15, "next": ["awake-idle-normal", "awake-reply-happy"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-look-around", "type": "anchor", "label": "环顾", "fps": 15, "next": ["awake-idle-normal", "awake-listening", "awake-tilt"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "micro"], "weight": 1 },
+    { "id": "awake-listening", "type": "anchor", "label": "倾听", "fps": 15, "next": ["awake-reply-normal", "awake-idle-normal", "awake-tilt"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "listen"], "weight": 1 },
+    { "id": "awake-reply-normal", "type": "anchor", "label": "回应", "fps": 15, "next": ["awake-idle-normal", "awake-listening"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "reply"], "weight": 1 },
+    { "id": "awake-reply-happy", "type": "anchor", "label": "开心回应", "fps": 15, "next": ["awake-idle-energetic", "awake-idle-normal"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "reply"], "weight": 1 },
+    { "id": "awake-reply-shy", "type": "anchor", "label": "害羞回应", "fps": 15, "next": ["awake-idle-normal", "awake-idle-sad"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "reply"], "weight": 1 },
+    { "id": "awake-reply-confused", "type": "anchor", "label": "疑惑回应", "fps": 15, "next": ["awake-tilt", "awake-idle-normal"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "reply"], "weight": 1 },
+    { "id": "awake-reply-sad", "type": "anchor", "label": "低落回应", "fps": 15, "next": ["awake-idle-sad", "awake-idle-normal"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "reply"], "weight": 1 },
+    { "id": "awake-touch-petting", "type": "anchor", "label": "抚摸反馈", "fps": 15, "next": ["awake-tail", "awake-reply-happy", "awake-idle-normal"], "videoUrls": [], "anchorStart": "awake", "anchorEnd": "awake", "tags": ["awake", "touch"], "weight": 1 }
   ],
   "sounds": [],
   "personality": {
-    "tone": "warm",
-    "replyStyle": "短句、热情、像一只圆脸亲人的小狗",
-    "traits": ["亲人", "热情", "会认真看着你"]
+    "tone": "soft",
+    "replyStyle": "短句、温柔、像一只安静黏人的小宠物",
+    "traits": ["安静", "黏人", "会认真听人说话"]
   }
 }

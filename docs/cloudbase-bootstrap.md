@@ -5,7 +5,7 @@
 ## 部署前检查
 
 1. `project.config.json` 需要包含 `cloudfunctionRoot: "cloudfunctions/"`。
-2. 微信开发者工具里选择环境 `cloud1-d0gz0y40r67b3198e`。
+2. 微信开发者工具里选择环境 `pet-dev-d6gpc4gw88ca1aa43`。
 3. 上传并部署 `cloudfunctions/bootstrap`。
 4. 如需云端覆盖配置，在云数据库创建集合 `app_configs`，写入文档 `_id = bootstrap`。
 

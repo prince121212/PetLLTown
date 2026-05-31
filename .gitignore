@@ -6,6 +6,7 @@ node_modules/
 miniprogram_npm/
 dist/
 build/
+.tmp/
 .DS_Store
 *.log
 *.tsbuildinfo

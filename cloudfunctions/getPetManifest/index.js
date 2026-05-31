@@ -26,6 +26,46 @@ function hasUsableManifest(value) {
   )
 }
 
+function normalizeManifestActions(actions) {
+  if (!Array.isArray(actions)) return []
+
+  return actions
+    .map((action) => {
+      if (!action || typeof action !== 'object') return null
+      const id = typeof action.id === 'string' ? action.id.trim() : ''
+      if (!id) return null
+
+      const next = Array.isArray(action.next) ? action.next.filter((item) => typeof item === 'string') : []
+      const videoUrls = Array.isArray(action.videoUrls) ? action.videoUrls.filter((item) => typeof item === 'string') : []
+      const tags = Array.isArray(action.tags) ? action.tags.filter((item) => typeof item === 'string') : []
+      const anchorStart = typeof action.anchorStart === 'string' ? action.anchorStart : (id.startsWith('sleep-') ? 'sleep' : 'awake')
+      const anchorEnd = typeof action.anchorEnd === 'string'
+        ? action.anchorEnd
+        : (id === 'transition-awake-to-sleep' ? 'sleep' : id === 'transition-sleep-to-awake' ? 'awake' : (anchorStart === 'sleep' ? 'sleep' : 'awake'))
+
+      return {
+        ...action,
+        id,
+        type: action.type === 'loop' || action.type === 'transition' || action.type === 'anchor' ? action.type : (anchorStart === anchorEnd ? 'anchor' : 'transition'),
+        next,
+        videoUrls,
+        tags,
+        anchorStart,
+        anchorEnd,
+      }
+    })
+    .filter(Boolean)
+}
+
+function normalizeManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') return manifest
+  return {
+    ...manifest,
+    defaultState: typeof manifest.defaultState === 'string' && manifest.defaultState ? manifest.defaultState : 'awake-idle-normal',
+    actions: normalizeManifestActions(manifest.actions),
+  }
+}
+
 function normalizePetId(value) {
   if (typeof value !== 'string' || !value.trim()) {
     return DEFAULT_PET_ID
@@ -50,34 +90,12 @@ async function readDatabaseManifest(petId) {
   }
 }
 
-async function readBootstrapPetVideoUrl(petId) {
-  try {
-    const result = await db.collection('app_configs').doc('bootstrap').get()
-    const config = result && result.data && result.data.config ? result.data.config : result && result.data
-    if (!config || !Array.isArray(config.pets)) return ''
-    const pet = config.pets.find((p) => p.id === petId)
-    return pet && pet.videoUrl ? pet.videoUrl : ''
-  } catch {
-    return ''
-  }
-}
-
 exports.main = async (event = {}) => {
   const wxContext = cloud.getWXContext()
   const requestedPetId = normalizePetId(event.petId)
   const databaseManifest = await readDatabaseManifest(requestedPetId)
   const bundledManifest = bundledManifests[requestedPetId] || bundledManifests[DEFAULT_PET_ID]
-  const manifest = databaseManifest || bundledManifest
-
-  if (manifest && Array.isArray(manifest.actions)) {
-    const idleAction = manifest.actions.find((a) => a.id === 'idle')
-    if (idleAction && (!Array.isArray(idleAction.videoUrls) || idleAction.videoUrls.length === 0)) {
-      const legacyUrl = await readBootstrapPetVideoUrl(requestedPetId)
-      if (legacyUrl) {
-        idleAction.videoUrls = [legacyUrl]
-      }
-    }
-  }
+  const manifest = normalizeManifest(databaseManifest || bundledManifest)
 
   return {
     ok: true,

@@ -42,7 +42,7 @@ async function uploadVideo(sourceFile, shouldApply = false) {
   const secretKey = env.TENCENTCLOUD_SECRET_KEY
   const bucket = env.COS_BUCKET
   const region = env.COS_REGION
-  const envId = env.CLOUDBASE_ENV_ID || 'cloud1-d0gz0y40r67b3198e'
+  const envId = env.CLOUDBASE_ENV_ID || 'pet-dev-d6gpc4gw88ca1aa43'
 
   if (!secretId || !secretKey || !bucket || !region) {
     console.error('❌ 缺少必要的环境变量')

@@ -75,7 +75,7 @@ function fallbackReply(text) {
     return {
       reply: '我在呢，刚才那句有点轻，再靠近一点说给我听。',
       emotion: 'curious',
-      nextAction: 'listening',
+      nextAction: 'awake-listening',
       source: 'fallback',
     }
   }
@@ -84,7 +84,7 @@ function fallbackReply(text) {
     return {
       reply: '晚安~ 我也困了，陪你一起睡。',
       emotion: 'sleepy',
-      nextAction: 'sleep-enter',
+      nextAction: 'transition-awake-to-sleep',
       source: 'fallback',
     }
   }
@@ -93,7 +93,7 @@ function fallbackReply(text) {
     return {
       reply: '你好呀，我刚刚认真听见你了。',
       emotion: 'happy',
-      nextAction: 'idle',
+      nextAction: 'awake-idle-normal',
       source: 'fallback',
     }
   }
@@ -102,7 +102,7 @@ function fallbackReply(text) {
     return {
       reply: '听起来亮晶晶的，我也跟着开心起来了。',
       emotion: 'happy',
-      nextAction: 'idle',
+      nextAction: 'awake-idle-energetic',
       source: 'fallback',
     }
   }
@@ -111,7 +111,7 @@ function fallbackReply(text) {
     return {
       reply: '我陪你慢慢待一会儿，不急着把心情变好。',
       emotion: 'gentle',
-      nextAction: 'idle',
+      nextAction: 'awake-idle-sad',
       source: 'fallback',
     }
   }
@@ -119,7 +119,7 @@ function fallbackReply(text) {
   return {
     reply: '我听懂啦，先把这句话悄悄放进小镇里。',
     emotion: 'curious',
-    nextAction: 'idle',
+    nextAction: 'awake-idle-normal',
     source: 'fallback',
   }
 }
@@ -284,8 +284,7 @@ function normalizeAiPayload(payload, text) {
   const fallback = fallbackReply(text)
   const reply = clampText(payload && payload.reply, 48) || fallback.reply
   const emotion = clampText(payload && payload.emotion, 24) || fallback.emotion
-  const validActions = ['idle', 'sleep-enter', 'listening']
-  const nextAction = validActions.includes(payload && payload.nextAction) ? payload.nextAction : fallback.nextAction
+  const nextAction = normalizeNextAction(payload && payload.nextAction) || fallback.nextAction
 
   let memory = null
   if (payload && payload.memory) {
@@ -305,6 +304,22 @@ function normalizeAiPayload(payload, text) {
     memory,
     source: 'ai',
   }
+}
+
+function normalizeNextAction(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  const mapped = {
+    idle: 'awake-idle-normal',
+    listening: 'awake-listening',
+    reply: 'awake-reply-normal',
+    'sleep-enter': 'transition-awake-to-sleep',
+    'sleep-exit': 'transition-sleep-to-awake',
+  }
+
+  if (!normalized) return ''
+  if (mapped[normalized]) return mapped[normalized]
+  if (normalized.startsWith('awake-') || normalized.startsWith('sleep-') || normalized.startsWith('transition-')) return normalized
+  return ''
 }
 
 async function writeAiLog(log) {
@@ -554,12 +569,15 @@ async function callCloudBaseAi(text, petId, petName, env, petStateInfo, memoryCo
             'reply 不超过 24 个中文字符。',
             'emotion 表达你的情绪：happy、curious、gentle、sleepy、excited。',
             'nextAction 决定你回复后的动作，只能是以下之一：',
-            '  idle — 回到日常待机（默认，大部分情况用这个）',
-            '  sleep-enter — 去睡觉（用户说晚安、说累了、说让你休息时）',
-            '  listening — 继续倾听（用户话没说完、你想让用户继续说时）',
-            '根据主人说的内容智能选择 nextAction，不要总是 idle。',
-            '如果主人说晚安/睡吧/休息，nextAction 必须是 sleep-enter。',
-            '如果主人的话像是没说完或者你想追问，nextAction 用 listening。',
+            '  awake-idle-normal — 回到清醒待机（默认，大部分情况用这个）',
+            '  awake-listening — 继续倾听（用户话没说完、你想让用户继续说时）',
+            '  awake-reply-normal / awake-reply-happy / awake-reply-shy / awake-reply-confused / awake-reply-sad — 回应用户',
+            '  transition-awake-to-sleep — 去睡觉（用户说晚安、说累了、说让你休息时）',
+            '  transition-sleep-to-awake — 从睡眠醒来',
+            '  awake-idle-energetic / awake-idle-tired / awake-idle-sad — 按状态回到对应清醒待机',
+            '根据主人说的内容智能选择 nextAction，不要总是给默认待机。',
+            '如果主人说晚安/睡吧/休息，nextAction 必须是 transition-awake-to-sleep。',
+            '如果主人的话像是没说完或者你想追问，nextAction 用 awake-listening。',
             '',
             'memory 字段规则：如果主人这句话包含值得长期记住的个人信息（偏好、事实、情绪、计划），输出 memory 对象：{"content":"不超过20字的概括","importance":0到1的重要性}。长期偏好和核心事实给0.7-0.9，临时情绪和近期计划给0.3-0.5。如果没有值得记住的（闲聊、打招呼），不要输出 memory 字段。',
             '记忆内容必须使用“主人”视角，例如“主人最喜欢粉色”“主人喜欢打篮球”，不要写成“用户最喜欢…”。',
